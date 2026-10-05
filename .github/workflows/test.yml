@@ -1,0 +1,20 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Synthetic tracker test
+        run: node test/synthetic.test.js
+      - name: index.html matches src/
+        run: |
+          node build.js
+          git diff --exit-code index.html || { echo "index.html is stale: run node build.js and commit it"; exit 1; }

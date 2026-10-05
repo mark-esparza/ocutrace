@@ -28,4 +28,4 @@ A Stimulus tab runs fixation, gaze holding, saccade, smooth pursuit and optokine
 
 ## Development
 
-The tool is a single static `index.html` with no external dependencies. Edit the files in `src/`, then run `node build.js` to rebuild it. `node test/synthetic.test.js` renders a synthetic eye with known right-beating nystagmus and checks that the tracker and analysis recover it.
+The tool is a single static `index.html` with no external dependencies. Edit the files in `src/`, then run `node build.js` to rebuild it. `node test/synthetic.test.js` renders a synthetic eye with known right-beating nystagmus and checks that the tracker and analysis recover it, exiting non-zero if any check fails. CI runs it on every push, along with a check that `index.html` was rebuilt from `src/`.
