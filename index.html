@@ -1,0 +1,1261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OcuTrace</title>
+<meta name="description" content="OcuTrace turns a phone video of the eyes into a nystagmus and saccade recording. Research prototype, not for diagnosis.">
+<style>html{-webkit-text-size-adjust:100%}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<style>
+/* Layout: one plain white column. Headings are black with red accents; red is reserved for marks that need attention. Single light theme, as requested. */
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --text: #111111;
+  --text-dim: #555555;
+  --red: #c8102e;
+  --rule: #e2e2e2;
+  --field: #b9b9b9;
+  --graph-bg: #ffffff;
+  --graph-minor: #f0f0f0;
+  --graph-major: #d6d6d6;
+  --graph-h: #111111;
+  --graph-v: #8c8c8c;
+  --graph-ev: #c8102e;
+  --graph-label: #333333;
+  --graph-sep: #bdbdbd;
+  --font: Tahoma, Verdana, "Segoe UI", Geneva, sans-serif;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 15px; line-height: 1.5; }
+.page { max-width: 780px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 56px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+
+/* heading */
+.masthead { display: grid; gap: 6px; padding-bottom: 14px; border-bottom: 3px solid var(--text); }
+.masthead h1 { margin: 0; font-size: 34px; font-weight: bold; letter-spacing: -0.02em; line-height: 1.1; color: var(--text); }
+.masthead h1 span { color: var(--red); }
+.masthead p { margin: 0; color: var(--text-dim); max-width: 60ch; }
+.masthead .caveat { color: var(--red); font-size: 14px; }
+
+/* tabs */
+.tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--rule); overflow-x: auto; }
+.tabs button { font: bold 15px var(--font); color: var(--text-dim); background: none; border: 0; padding: 10px 0 11px; margin-bottom: -1px; border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--red); }
+
+.panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 36px; }
+.group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+.group > h2 { margin: 0; font-size: 20px; font-weight: bold; color: var(--text); line-height: 1.25; }
+.group > h2 .n { color: var(--red); margin-right: 6px; }
+.hint { margin: 0; color: var(--text-dim); max-width: 64ch; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* buttons */
+.btn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 16px; font: bold 14px var(--font); color: var(--text); background: var(--bg); border: 1.5px solid var(--text); border-radius: 4px; cursor: pointer; }
+.btn:hover { background: #f3f3f3; }
+.btn.default { background: var(--text); color: #fff; }
+.btn.default:hover { background: #333; }
+.btn:disabled { color: #9a9a9a; border-color: #cfcfcf; background: #f7f7f7; cursor: default; }
+.btn input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.btn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); }
+.link { background: none; border: 0; padding: 4px 0; font: 14px var(--font); color: var(--text); text-decoration: underline; text-decoration-color: var(--red); text-underline-offset: 3px; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 20px; }
+.field { display: grid; gap: 4px; font-size: 14px; }
+select { font: 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--field); border-radius: 4px; padding: 8px; min-height: 42px; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 14px; min-height: 42px; }
+.check input { width: 17px; height: 17px; accent-color: var(--red); }
+input[type=range] { width: 100%; accent-color: var(--red); }
+.status { margin: 0; font-size: 14px; color: var(--text-dim); min-height: 1.5em; }
+.status.err { color: var(--red); }
+
+.sunken { border: 1px solid var(--rule); border-radius: 4px; }
+.viewfinder { position: relative; background: #000; overflow: hidden; }
+#frame { display: block; width: 100%; height: auto; touch-action: manipulation; cursor: crosshair; }
+.viewfinder .readout { position: absolute; left: 8px; bottom: 8px; font-size: 12px; color: #fff; background: rgb(0 0 0 / 0.65); padding: 2px 6px; pointer-events: none; max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.progress { height: 6px; background: var(--rule); border-radius: 3px; overflow: hidden; }
+.progress .bar { height: 100%; width: 0; background: var(--text); }
+
+/* results */
+.verdict { display: grid; gap: 4px; padding-left: 14px; border-left: 4px solid var(--text); }
+.verdict.found { border-left-color: var(--red); }
+.verdict svg { display: none; }
+.call { margin: 0; font-size: 24px; font-weight: bold; line-height: 1.2; color: var(--text); }
+.verdict.found .call { color: var(--red); }
+.callsub { margin: 0; max-width: 62ch; }
+.source { margin: 0; font-size: 14px; color: var(--text-dim); }
+.strip { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
+.strip .graph { overflow-x: auto; background: var(--graph-bg); }
+.strip canvas { display: block; }
+.strip figcaption { font-size: 13px; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.strip figcaption i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; background: var(--c); }
+.listview { overflow-x: auto; border: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { text-align: left; font-weight: bold; padding: 8px 10px 8px 0; border-bottom: 2px solid var(--text); white-space: nowrap; }
+td { padding: 8px 10px 8px 0; vertical-align: top; border-bottom: 1px solid var(--rule); }
+td.val { white-space: nowrap; font-weight: bold; }
+td.val span { font-weight: normal; margin-left: 3px; }
+td.basis { color: var(--text-dim); }
+.num { text-align: right; padding-left: 10px; padding-right: 0; }
+.warn { margin: 0; padding-left: 12px; border-left: 3px solid var(--red); max-width: 66ch; }
+.warn svg { display: none; }
+details { display: grid; gap: 8px; border-top: 1px solid var(--rule); padding-top: 12px; }
+summary { cursor: pointer; font-weight: bold; }
+details ul { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+details li { max-width: 68ch; }
+details .listview { margin-top: 8px; }
+textarea#csvBox { width: 100%; min-height: 110px; font: 12px "Courier New", monospace; background: var(--bg); color: var(--text); border: 1px solid var(--field); border-radius: 4px; padding: 8px; }
+
+/* stimulus */
+.stage { position: relative; background: #000; overflow: hidden; aspect-ratio: 16 / 9; max-width: 100%; }
+.stage canvas { width: 100%; height: 100%; display: block; }
+.stage .hud { position: absolute; left: 8px; top: 8px; font-size: 12px; color: #e6e6e6; background: rgb(0 0 0 / 0.72); padding: 2px 6px; pointer-events: none; }
+.stage:fullscreen { aspect-ratio: auto; }
+
+/* guide */
+.group ol { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+.group li { max-width: 66ch; }
+dl { margin: 0; display: grid; gap: 12px; }
+dt { font-weight: bold; }
+dd { margin: 2px 0 0; color: var(--text-dim); max-width: 64ch; }
+
+footer { border-top: 1px solid var(--rule); padding-top: 14px; font-size: 13px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="masthead">
+    <h1>Ocu<span>Trace</span></h1>
+    <p>Turns a phone video of the eyes into a nystagmus and saccade recording.</p>
+    <p class="caveat">Research prototype. Not a medical device and not for diagnosis.</p>
+  </header>
+
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" id="tab-analyze" aria-controls="panel-analyze" aria-selected="true">Analyze</button>
+      <button role="tab" id="tab-stimulus" aria-controls="panel-stimulus" aria-selected="false">Stimulus</button>
+      <button role="tab" id="tab-guide" aria-controls="panel-guide" aria-selected="false">Guide</button>
+    </nav>
+
+    <div>
+      <!-- ANALYZE -->
+      <div id="panel-analyze" class="panel" role="tabpanel" aria-labelledby="tab-analyze">
+        <section class="group" aria-labelledby="h-load">
+          <h2 id="h-load"><span class="n">1</span>Load a video of the eyes</h2>
+          <p class="hint">Record with the phone camera or pick a clip you already have. The video is read in this page and never uploaded.</p>
+          <div class="row">
+            <label class="btn default" for="recInput"><span class="dot" aria-hidden="true"></span>Record video<input id="recInput" type="file" accept="video/*" capture="user"></label>
+            <label class="btn" for="fileInput">Choose a clip<input id="fileInput" type="file" accept="video/*"></label>
+            <button class="link" id="synBtn" type="button">Replay the synthetic eye</button>
+          </div>
+          <div class="settings">
+            <label class="field" for="slowmo">Capture speed
+              <select id="slowmo">
+                <option value="1">Normal video</option>
+                <option value="4">Slow motion, 120 fps (plays 4× slower)</option>
+                <option value="8">Slow motion, 240 fps (plays 8× slower)</option>
+              </select>
+            </label>
+            <label class="check" for="mirrored"><input type="checkbox" id="mirrored">The clip is mirrored like a selfie preview</label>
+          </div>
+          <p class="status" id="srcStatus" role="status"></p>
+          <video id="vid" muted playsinline preload="auto" style="position:absolute;width:2px;height:2px;opacity:0.01;pointer-events:none;left:0;top:0"></video>
+        </section>
+
+        <section class="group" id="markCard" aria-labelledby="h-mark">
+          <h2 id="h-mark"><span class="n">2</span>Mark the eye</h2>
+          <p class="hint">Tap the center of one iris, then a fixed point on the face such as a sticker on the nose bridge.</p>
+          <div class="viewfinder sunken">
+            <canvas id="frame" width="480" height="320" aria-label="Grayscale first frame, as the tracker sees it. Tap to place marks."></canvas>
+            <span class="readout" id="markSource">Synthetic eye</span>
+          </div>
+          <p class="status" id="markStatus" role="status"></p>
+          <label class="field" for="irisSize">Iris outline: drag until the red ring sits on the iris edge
+            <input type="range" id="irisSize" min="60" max="160" value="100">
+          </label>
+          <div class="row">
+            <button class="btn default" id="trackBtn" type="button">Track eye movements</button>
+            <button class="btn" id="markIrisBtn" type="button">Re-mark iris</button>
+            <button class="btn" id="markRefBtn" type="button">Mark fixed point</button>
+            <button class="btn" id="clearRefBtn" type="button">Clear fixed point</button>
+          </div>
+          <div class="progress" id="prog" hidden role="progressbar" aria-label="Tracking progress" aria-valuemin="0" aria-valuemax="100"><div class="bar"></div></div>
+        </section>
+
+        <section class="group" id="resultCard" aria-labelledby="h-read">
+          <h2 id="h-read"><span class="n">3</span>Read the recording</h2>
+          <p class="source" id="resultSource">Synthetic eye with right-beating nystagmus built in at 6°/s and 2.5 beats/s.</p>
+          <div class="verdict" id="verdictBox">
+            <svg class="icon-info" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="12.5" fill="#2f6fd6" stroke="#0b3c96"/><rect x="12.4" y="12" width="3.2" height="9" fill="#fff"/><circle cx="14" cy="8.2" r="1.9" fill="#fff"/></svg>
+            <svg class="icon-warn" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M14 2 L27 25 H1 Z" fill="#ffd200" stroke="#7a5c00" stroke-linejoin="round"/><rect x="12.6" y="9" width="2.8" height="9" fill="#000"/><circle cx="14" cy="21.3" r="1.6" fill="#000"/></svg>
+            <div>
+              <p class="call" id="verdictText">Tracking the sample...</p>
+              <p class="callsub" id="verdictSub"></p>
+            </div>
+          </div>
+          <figure class="strip">
+            <div class="graph sunken" id="paper"><canvas id="strip" role="img" aria-label="Eye position and speed over time"></canvas></div>
+            <figcaption>
+              <span><i style="--c:var(--graph-h)"></i>Horizontal, up is the patient's right</span>
+              <span><i style="--c:var(--graph-v)"></i>Vertical, up is up</span>
+              <span><i style="--c:var(--graph-ev)"></i>Fast phase or saccade</span>
+            </figcaption>
+          </figure>
+          <div class="listview sunken">
+            <table id="measures">
+              <thead><tr><th>Measure</th><th>Value</th><th>Basis</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="warn" id="fpsNote" hidden></p>
+          <div class="row">
+            <button class="btn" id="saveCsv" type="button" hidden>Save trace as CSV</button>
+            <button class="btn" id="copyCsv" type="button">Copy trace as CSV</button>
+          </div>
+          <p class="status" id="csvStatus" role="status"></p>
+          <textarea id="csvBox" hidden readonly aria-label="Trace CSV"></textarea>
+          <details id="evDetails">
+            <summary id="evSummary">Fast events</summary>
+            <div class="listview sunken"><table id="evTable"><thead><tr><th class="num">Time (s)</th><th>Type</th><th>Direction</th><th class="num">Size (°)</th><th class="num">Peak (°/s)</th></tr></thead><tbody></tbody></table></div>
+            <p class="status" id="evMore"></p>
+          </details>
+          <details>
+            <summary>How these numbers are computed</summary>
+            <ul>
+              <li>Each frame, the iris is found as the darkest disk against a brighter surround, then refined to sub-pixel accuracy from the centroid of its dark pixels. Frames where iris contrast drops below 45% of the first frame count as blinks.</li>
+              <li>When a fixed point is marked, it is followed by template matching and subtracted, which removes head movement.</li>
+              <li>Pixels become degrees by assuming an 11.7 mm iris and a 12 mm eye radius. Treat degrees as approximate until checked against a lab tracker.</li>
+              <li>A fast event is any stretch where speed exceeds the larger of 20°/s and the median speed plus six robust standard deviations.</li>
+              <li>Nystagmus is called when at least three fast phases go one way (70% agreement) and the median slow phase velocity between them is at least 2°/s the other way.</li>
+              <li>Square wave jerks are opposite horizontal saccade pairs of 0.5° to 5°, similar in size, 150 to 500 ms apart.</li>
+              <li>Torsional nystagmus is not measured. Below about 240 fps, peak speeds read low and brief saccades can be missed.</li>
+            </ul>
+          </details>
+        </section>
+      </div>
+
+      <!-- STIMULUS -->
+      <div id="panel-stimulus" class="panel" role="tabpanel" aria-labelledby="tab-stimulus" hidden>
+        <section class="group" aria-labelledby="h-stim">
+          <h2 id="h-stim">Stimulus screen</h2>
+          <p class="hint">Run this on a laptop or tablet at eye level, 50 to 70 cm from the patient, while a phone records their eyes.</p>
+          <div class="settings">
+            <label class="field" for="task">Task
+              <select id="task">
+                <option value="fixation">Fixation, 20 s</option>
+                <option value="gaze">Gaze holding: right, left, up, down</option>
+                <option value="sacH">Saccades, horizontal</option>
+                <option value="sacV">Saccades, vertical</option>
+                <option value="pursuit">Smooth pursuit, 0.4 Hz</option>
+                <option value="okn">Optokinetic stripes</option>
+              </select>
+            </label>
+            <label class="field" for="oknDir">Stripe direction
+              <select id="oknDir"><option value="1">Moving right</option><option value="-1">Moving left</option></select>
+            </label>
+          </div>
+          <div class="stage sunken" id="stage"><canvas id="stim"></canvas><div class="hud" id="hud">Ready</div></div>
+          <div class="row">
+            <button class="btn default" id="stimStart" type="button">Start task</button>
+            <button class="btn" id="stimStop" type="button">Stop</button>
+            <button class="btn" id="stimFull" type="button">Full screen</button>
+          </div>
+          <p class="status" id="stimStatus"></p>
+        </section>
+      </div>
+
+      <!-- GUIDE -->
+      <div id="panel-guide" class="panel" role="tabpanel" aria-labelledby="tab-guide" hidden>
+        <section class="group" aria-labelledby="h-guide">
+          <h2 id="h-guide">Recording a clip that tracks well</h2>
+          <ol>
+            <li>Light the face evenly from the front. A window or lamp behind the patient hides the iris edge.</li>
+            <li>Put the phone on a stand 15 to 25 cm from the face, just below the line of sight, with both eyes filling most of the frame.</li>
+            <li>For gaze, saccade, pursuit and optokinetic tasks, run the Stimulus tab on a second device 50 to 70 cm away.</li>
+            <li>Put a small dark dot sticker on the bridge of the nose and mark it as the fixed point, so head movement cancels out.</li>
+            <li>Use slow motion (120 or 240 fps) when saccade speed matters, and set Capture speed to match. Normal video is enough for nystagmus and fixation.</li>
+            <li>Record 10 to 30 seconds per task with the head resting on a hand or chin rest.</li>
+          </ol>
+        </section>
+        <section class="group" aria-labelledby="h-mean">
+          <h2 id="h-mean">What the measures mean</h2>
+          <dl>
+            <dt>Slow phase velocity</dt>
+            <dd>Speed of the drift between beats, in degrees per second. The 2°/s cutoff for calling nystagmus follows the threshold used to validate the Johns Hopkins EyePhone app against video goggles.</dd>
+            <dt>Beat frequency</dt>
+            <dd>Fast phases per second in the dominant direction. The fast phase direction names the nystagmus.</dd>
+            <dt>Square wave jerks</dt>
+            <dd>Small paired saccades away from and back to the target during fixation. Rates rise in some cerebellar and basal ganglia disorders, so read them only from fixation recordings.</dd>
+            <dt>Frames tracked</dt>
+            <dd>Share of frames where the iris was found. Blinks and glare lower it.</dd>
+          </dl>
+        </section>
+      </div>
+    </div>
+
+    <footer>Video is processed on this device and never leaves it. Degrees are estimates from iris size, not a calibrated measurement.</footer>
+</div>
+
+<script>
+// OcuTrace core: iris locator, template matcher, and oculomotor analysis.
+// Pure functions, no DOM. Shared by the page and the Node tests.
+
+const OT = (() => {
+  const HVID_MM = 11.7;      // average horizontal visible iris diameter
+  const EYE_RADIUS_MM = 12;  // approximate rotation radius of the globe
+
+  function integral(g, N) {
+    const W = N + 1;
+    const I = new Float64Array(W * W);
+    for (let y = 0; y < N; y++) {
+      let row = 0;
+      for (let x = 0; x < N; x++) {
+        row += g[y * N + x];
+        I[(y + 1) * W + (x + 1)] = I[y * W + (x + 1)] + row;
+      }
+    }
+    return I;
+  }
+
+  // Sum and area of the square [cx-h, cx+h] x [cy-h, cy+h], clamped to the image.
+  function box(I, N, cx, cy, h) {
+    const W = N + 1;
+    const x0 = Math.max(0, Math.round(cx - h)), x1 = Math.min(N, Math.round(cx + h) + 1);
+    const y0 = Math.max(0, Math.round(cy - h)), y1 = Math.min(N, Math.round(cy + h) + 1);
+    if (x1 <= x0 || y1 <= y0) return { s: 0, a: 0 };
+    const s = I[y1 * W + x1] - I[y0 * W + x1] - I[y1 * W + x0] + I[y0 * W + x0];
+    return { s, a: (x1 - x0) * (y1 - y0) };
+  }
+
+  // Dark disk on a brighter surround: ring mean minus core mean.
+  function irisScore(I, N, cx, cy, r) {
+    const core = box(I, N, cx, cy, 0.7 * r);
+    const inner = box(I, N, cx, cy, 1.15 * r);
+    const outer = box(I, N, cx, cy, 1.7 * r);
+    const ringA = outer.a - inner.a;
+    if (core.a === 0 || ringA <= 0) return { score: -1e9, dark: 0, ring: 0 };
+    const dark = core.s / core.a;
+    const ring = (outer.s - inner.s) / ringA;
+    return { score: ring - dark, dark, ring };
+  }
+
+  function locateIris(g, N, gx, gy, r, I, searchX, searchY) {
+    I = I || integral(g, N);
+    let best = { score: -1e9, x: gx, y: gy, dark: 0, ring: 0 };
+    const rx = Math.max(2, Math.round(searchX ?? r)), ry = Math.max(2, Math.round(searchY ?? 0.7 * r));
+    for (let dy = -ry; dy <= ry; dy++) {
+      for (let dx = -rx; dx <= rx; dx++) {
+        const cx = Math.round(gx) + dx, cy = Math.round(gy) + dy;
+        const s = irisScore(I, N, cx, cy, r);
+        if (s.score > best.score) best = { score: s.score, x: cx, y: cy, dark: s.dark, ring: s.ring };
+      }
+    }
+    // Sub-pixel refinement: centroid of dark pixels inside the iris.
+    const T = best.dark + 0.5 * (best.ring - best.dark);
+    const R = 1.1 * r, R2 = R * R;
+    let sw = 0, sx = 0, sy = 0;
+    const x0 = Math.max(0, Math.floor(best.x - R)), x1 = Math.min(N - 1, Math.ceil(best.x + R));
+    const y0 = Math.max(0, Math.floor(best.y - R)), y1 = Math.min(N - 1, Math.ceil(best.y + R));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const ddx = x - best.x, ddy = y - best.y;
+        if (ddx * ddx + ddy * ddy > R2) continue;
+        const w = T - g[y * N + x];
+        if (w > 0) { sw += w; sx += w * x; sy += w * y; }
+      }
+    }
+    let x = best.x, y = best.y;
+    if (sw > 1e-6) { x = sx / sw; y = sy / sw; }
+    return { x, y, score: best.score, dark: best.dark, ring: best.ring };
+  }
+
+  function estimateRadius(g, N, gx, gy, rMin, rMax) {
+    const I = integral(g, N);
+    let best = null;
+    for (let r = rMin; r <= rMax; r += 1) {
+      const span = Math.max(3, Math.round(0.6 * r));
+      for (let dy = -span; dy <= span; dy++) for (let dx = -span; dx <= span; dx++) {
+        const cx = Math.round(gx) + dx, cy = Math.round(gy) + dy;
+        const s = irisScore(I, N, cx, cy, r);
+        if (!best || s.score > best.score) best = { r, x: cx, y: cy, score: s.score };
+      }
+    }
+    // The box score favours a small radius when the pupil is very dark, so measure the
+    // limbus directly: the outermost strong dark-to-bright edge along each horizontal ray.
+    const cx = best.x, cy = best.y, dMax = Math.min(3 * rMax, Math.floor(N / 2) - 2);
+    const edge = sign => {
+      const p = [];
+      for (let d = 0; d <= dMax + 1; d++) {
+        const x = cx + sign * d; let s = 0, c = 0;
+        if (x < 0 || x >= N) { p.push(p.length ? p[p.length - 1] : 0); continue; }
+        for (let yy = cy - 2; yy <= cy + 2; yy++) if (yy >= 0 && yy < N) { s += g[yy * N + x]; c++; }
+        p.push(s / c);
+      }
+      let gmax = 0; const gr = [];
+      for (let d = 1; d < p.length - 1; d++) { gr[d] = p[d + 1] - p[d - 1]; if (d >= rMin && gr[d] > gmax) gmax = gr[d]; }
+      let at = best.r;
+      for (let d = rMin; d < p.length - 1; d++) if (gr[d] >= 0.6 * gmax) at = d;
+      // keep only the edge cluster that contains the outermost strong gradient
+      return at;
+    };
+    const dL = edge(-1), dR = edge(1);
+    const r = Math.max(rMin, Math.min(rMax * 1.5, (dL + dR) / 2));
+    const loc = locateIris(g, N, cx + (dR - dL) / 2, cy, r, I, 3, 3);
+    return { r, x: loc.x, y: loc.y, score: loc.score };
+  }
+
+  // Sum of absolute differences template match around a guess.
+  function matchTemplate(g, N, tpl, th, gx, gy, search) {
+    const tw = 2 * th + 1;
+    let best = { sad: Infinity, x: gx, y: gy };
+    const cx0 = Math.round(gx), cy0 = Math.round(gy);
+    for (let dy = -search; dy <= search; dy++) {
+      for (let dx = -search; dx <= search; dx++) {
+        const cx = cx0 + dx, cy = cy0 + dy;
+        if (cx - th < 0 || cy - th < 0 || cx + th >= N || cy + th >= N) continue;
+        let sad = 0;
+        for (let ty = 0; ty < tw; ty++) {
+          const gi = (cy - th + ty) * N + (cx - th);
+          const ti = ty * tw;
+          for (let tx = 0; tx < tw; tx++) sad += Math.abs(g[gi + tx] - tpl[ti + tx]);
+          if (sad >= best.sad) break;
+        }
+        if (sad < best.sad) best = { sad, x: cx, y: cy };
+      }
+    }
+    if (!Number.isFinite(best.sad)) return best;
+    // Parabolic sub-pixel refinement on the SAD surface.
+    const sadAt = (cx, cy) => {
+      if (cx - th < 0 || cy - th < 0 || cx + th >= N || cy + th >= N) return NaN;
+      let sad = 0;
+      for (let ty = 0; ty < tw; ty++) { const gi = (cy - th + ty) * N + (cx - th), ti = ty * tw; for (let tx = 0; tx < tw; tx++) sad += Math.abs(g[gi + tx] - tpl[ti + tx]); }
+      return sad;
+    };
+    const vertex = (a, b, c) => { const d = a - 2 * b + c; return Number.isFinite(d) && d > 0 ? Math.max(-0.5, Math.min(0.5, (a - c) / (2 * d))) : 0; };
+    const x = best.x + vertex(sadAt(best.x - 1, best.y), best.sad, sadAt(best.x + 1, best.y));
+    const y = best.y + vertex(sadAt(best.x, best.y - 1), best.sad, sadAt(best.x, best.y + 1));
+    return { sad: best.sad, x, y };
+  }
+
+  function cutTemplate(g, N, cx, cy, th) {
+    const tw = 2 * th + 1, tpl = new Float32Array(tw * tw);
+    for (let ty = 0; ty < tw; ty++) for (let tx = 0; tx < tw; tx++) {
+      const x = Math.min(N - 1, Math.max(0, Math.round(cx) - th + tx));
+      const y = Math.min(N - 1, Math.max(0, Math.round(cy) - th + ty));
+      tpl[ty * tw + tx] = g[y * N + x];
+    }
+    return tpl;
+  }
+
+  // Pixel displacement to approximate degrees of eye rotation.
+  function pxToDeg(dPx, irisRadiusPx) {
+    const mm = dPx * (HVID_MM / 2) / irisRadiusPx;
+    const s = Math.max(-1, Math.min(1, mm / EYE_RADIUS_MM));
+    return Math.asin(s) * 180 / Math.PI;
+  }
+  function degToPx(deg, irisRadiusPx) {
+    return EYE_RADIUS_MM * Math.sin(deg * Math.PI / 180) * irisRadiusPx / (HVID_MM / 2);
+  }
+
+  // ---------- analysis ----------
+  const median = a => { const b = a.filter(Number.isFinite).sort((p, q) => p - q); if (!b.length) return NaN; const m = b.length >> 1; return b.length % 2 ? b[m] : (b[m - 1] + b[m]) / 2; };
+  function slope(ts, ys) {
+    const n = ts.length; let mt = 0, my = 0;
+    for (let i = 0; i < n; i++) { mt += ts[i]; my += ys[i]; }
+    mt /= n; my /= n;
+    let num = 0, den = 0;
+    for (let i = 0; i < n; i++) { num += (ts[i] - mt) * (ys[i] - my); den += (ts[i] - mt) ** 2; }
+    return den > 0 ? num / den : NaN;
+  }
+
+  // samples: [{t, x, y, ok}] with x = degrees toward the subject's right, y = degrees up.
+  function analyze(samples, opts = {}) {
+    const n = samples.length;
+    const t = samples.map(s => s.t);
+    const ok = samples.map(s => !!s.ok && Number.isFinite(s.x) && Number.isFinite(s.y));
+    const x = samples.map((s, i) => ok[i] ? s.x : NaN);
+    const y = samples.map((s, i) => ok[i] ? s.y : NaN);
+    const interp = new Array(n).fill(false);
+
+    // Fill gaps of up to 3 samples.
+    for (let i = 0; i < n; i++) {
+      if (ok[i]) continue;
+      let j = i; while (j < n && !ok[j]) j++;
+      if (i > 0 && j < n && j - i <= 3) {
+        for (let k = i; k < j; k++) {
+          const f = (t[k] - t[i - 1]) / (t[j] - t[i - 1]);
+          x[k] = x[i - 1] + f * (x[j] - x[i - 1]);
+          y[k] = y[i - 1] + f * (y[j] - y[i - 1]);
+          ok[k] = true; interp[k] = true;
+        }
+      }
+      i = j - 1;
+    }
+
+    const mx = median(x), my = median(y);
+    for (let i = 0; i < n; i++) if (ok[i]) { x[i] -= mx; y[i] -= my; }
+
+    const dts = []; for (let i = 1; i < n; i++) dts.push(t[i] - t[i - 1]);
+    const dt = median(dts);
+    const fps = dt > 0 ? 1 / dt : NaN;
+    const validN = ok.filter(Boolean).length;
+    const duration = n > 1 ? t[n - 1] - t[0] : 0;
+    const validDuration = validN * (dt || 0);
+
+    const vx = new Array(n).fill(NaN), vy = new Array(n).fill(NaN), sp = new Array(n).fill(NaN);
+    for (let i = 1; i < n - 1; i++) {
+      if (!(ok[i - 1] && ok[i] && ok[i + 1])) continue;
+      const d = t[i + 1] - t[i - 1];
+      vx[i] = (x[i + 1] - x[i - 1]) / d; vy[i] = (y[i + 1] - y[i - 1]) / d;
+      sp[i] = Math.hypot(vx[i], vy[i]);
+    }
+    const spMed = median(sp);
+    const spMad = median(sp.map(v => Math.abs(v - spMed))) * 1.4826;
+    const threshold = Math.max(opts.minThreshold || 20, spMed + 6 * spMad);
+
+    // Fast events (saccades and nystagmus fast phases).
+    const runs = [];
+    for (let i = 0; i < n; i++) {
+      if (!(sp[i] > threshold)) continue;
+      let j = i; while (j + 1 < n && (sp[j + 1] > threshold || (sp[j + 2] > threshold && j + 2 < n))) j++;
+      runs.push([i, j]); i = j;
+    }
+    const events = [];
+    for (const [i0, i1] of runs) {
+      const a = i0 - 1, b = i1 + 1;
+      if (a < 0 || b >= n || !ok[a] || !ok[b]) continue;
+      const dx = x[b] - x[a], dy = y[b] - y[a];
+      const amp = Math.hypot(dx, dy);
+      if (amp < 0.4) continue;
+      let pv = 0; for (let k = i0; k <= i1; k++) if (sp[k] > pv) pv = sp[k];
+      events.push({ i0, i1, t: t[a], tEnd: t[b], dx, dy, amp, peakVel: pv });
+    }
+
+    function axis(name) {
+      const pos = name === 'h' ? x : y;
+      const comp = e => name === 'h' ? e.dx : e.dy;
+      const fast = events.filter(e => Math.abs(comp(e)) >= 0.5);
+      const plus = fast.filter(e => comp(e) > 0).length, minus = fast.length - plus;
+      const domSign = plus >= minus ? 1 : -1;
+      const domCount = Math.max(plus, minus);
+      const consistency = fast.length ? domCount / fast.length : 0;
+      // Slow phases between events.
+      const bounds = [{ i1: -2 }, ...events, { i0: n + 1 }];
+      const spv = [];
+      for (let k = 0; k < bounds.length - 1; k++) {
+        const s0 = bounds[k].i1 + 2, s1 = bounds[k + 1].i0 - 2;
+        if (s1 - s0 + 1 < 4) continue;
+        const ts = [], ps = []; let clean = true;
+        for (let i = s0; i <= s1; i++) { if (!ok[i]) { clean = false; break; } ts.push(t[i]); ps.push(pos[i]); }
+        if (!clean || ts[ts.length - 1] - ts[0] < 0.1) continue;
+        spv.push({ t: ts[0], tEnd: ts[ts.length - 1], v: slope(ts, ps) });
+      }
+      const medSpv = median(spv.map(s => s.v));
+      const opp = spv.filter(s => Math.sign(s.v) === -domSign).length;
+      const slowConsistency = spv.length ? opp / spv.length : 0;
+      const beatHz = validDuration > 0 ? domCount / validDuration : 0;
+      const present = domCount >= 3 && consistency >= 0.7 && Math.abs(medSpv) >= 2 &&
+        Math.sign(medSpv) === -domSign && slowConsistency >= 0.6;
+      const dir = name === 'h' ? (domSign > 0 ? 'Right-beating' : 'Left-beating') : (domSign > 0 ? 'Upbeat' : 'Downbeat');
+      return { axis: name, present, direction: dir, fastCount: domCount, consistency, medSpv, slowConsistency, beatHz, spv, evidence: present ? domCount * Math.abs(medSpv) : 0 };
+    }
+    const h = axis('h'), v = axis('v');
+    const nyst = h.evidence >= v.evidence ? h : v;
+
+    // Square wave jerks: small opposite horizontal saccade pairs.
+    const hs = events.filter(e => Math.abs(e.dx) >= Math.abs(e.dy));
+    let swj = 0; const swjList = [];
+    for (let k = 0; k < hs.length - 1; k++) {
+      const a = hs[k], b = hs[k + 1];
+      const A = Math.abs(a.dx), B = Math.abs(b.dx);
+      const isi = b.t - a.tEnd;
+      if (A >= 0.5 && A <= 5 && B >= 0.5 && B <= 5 && Math.sign(a.dx) !== Math.sign(b.dx) && B / A >= 0.5 && B / A <= 2 && isi >= 0.15 && isi <= 0.5) {
+        swj++; swjList.push(a.t); k++;
+      }
+    }
+    const swjPerMin = validDuration > 0 ? swj / (validDuration / 60) : 0;
+
+    return {
+      n, t, x, y, ok, interp, vx, vy, sp, fps, duration, validPct: n ? validN / n : 0, validDuration,
+      threshold, events, h, v, nyst, swj, swjList, swjPerMin,
+      medianPeakVel: median(events.map(e => e.peakVel)),
+    };
+  }
+
+  // Deterministic waveform for the synthetic eye (degrees, subject frame).
+  function syntheticWave(fs, seconds, seed = 7) {
+    let s = seed; const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+    const gauss = () => { let u = 0; for (let i = 0; i < 6; i++) u += rnd(); return (u - 3) / Math.sqrt(0.5); };
+    const out = [];
+    // Right-beating jerk nystagmus: slow drift left at 6 deg/s, fast reset right, 2.5 beats/s.
+    const period = 0.4, fastDur = 0.025, spv = -6;
+    const A = -spv * (period - fastDur);
+    for (let i = 0; i < fs * seconds; i++) {
+      const t = i / fs;
+      const ph = (t + 0.13) % period;
+      let h;
+      if (ph < period - fastDur) h = A / 2 + spv * ph;
+      else h = -A / 2 + A * ((ph - (period - fastDur)) / fastDur);
+      const v = 0;
+      const blink = t >= 3.0 && t < 3.15;
+      out.push({ t, h: h + 0.04 * gauss(), v: v + 0.04 * gauss(), blink });
+    }
+    return out;
+  }
+
+  return { integral, box, irisScore, locateIris, estimateRadius, matchTemplate, cutTemplate, pxToDeg, degToPx, analyze, syntheticWave, median, HVID_MM, EYE_RADIUS_MM };
+})();
+
+</script>
+<script>
+(() => {
+  const $ = s => document.querySelector(s);
+  const N = 120;               // tracking crop size, px
+  const WIDE = 200;            // crop size used to size the iris at the tap
+  const MAX_SECONDS = 60;
+
+  // ---------- small helpers ----------
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const fmt = (v, d = 1) => Number.isFinite(v) ? v.toFixed(d) : '–';
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const ctxCache = {};
+  function cropCtx(n) {
+    if (!ctxCache[n]) { const c = document.createElement('canvas'); c.width = c.height = n; ctxCache[n] = c.getContext('2d', { willReadFrequently: true }); }
+    return ctxCache[n];
+  }
+  function cropGray(drawable, vw, vh, cx, cy, side, n) {
+    side = Math.min(side, vw, vh);
+    const sx = Math.max(0, Math.min(vw - side, cx - side / 2));
+    const sy = Math.max(0, Math.min(vh - side, cy - side / 2));
+    const ctx = cropCtx(n);
+    ctx.clearRect(0, 0, n, n);
+    ctx.drawImage(drawable, sx, sy, side, side, 0, 0, n, n);
+    const d = ctx.getImageData(0, 0, n, n).data;
+    const g = new Float32Array(n * n);
+    for (let i = 0, j = 0; i < g.length; i++, j += 4) g[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+    return { g, sx, sy, s: n / side };
+  }
+
+  // ---------- synthetic eye ----------
+  const SYN = { vw: 480, vh: 320, fs: 60, seconds: 6, R: 56, CX: 240, CY: 160 };
+  const synCanvas = document.createElement('canvas'); synCanvas.width = SYN.vw; synCanvas.height = SYN.vh;
+  const synCtx = synCanvas.getContext('2d');
+  const synWave = OT.syntheticWave(SYN.fs, SYN.seconds);
+  // Drawn like an infrared goggle camera: grey skin, bright sclera, dark iris and pupil, two LED glints.
+  function drawSynEye(hDeg, vDeg, blink) {
+    const c = synCtx, { CX, CY, R } = SYN;
+    const skin = c.createRadialGradient(CX, CY, 40, CX, CY, 300);
+    skin.addColorStop(0, '#a3a3a3'); skin.addColorStop(1, '#6e6e6e');
+    c.fillStyle = skin; c.fillRect(0, 0, SYN.vw, SYN.vh);
+    c.fillStyle = '#2a2a2a'; c.beginPath(); c.arc(CX + 190, 60, 9, 0, Math.PI * 2); c.fill();   // nose bridge sticker
+    c.save();
+    c.beginPath(); c.ellipse(CX, CY, 150, 66, 0, 0, Math.PI * 2); c.clip();
+    if (blink) { c.fillStyle = '#8f8f8f'; c.fillRect(0, 0, SYN.vw, SYN.vh); }
+    else {
+      const sc = c.createRadialGradient(CX, CY, 20, CX, CY, 160);
+      sc.addColorStop(0, '#e6e6e6'); sc.addColorStop(1, '#bdbdbd');
+      c.fillStyle = sc; c.fillRect(CX - 160, CY - 80, 320, 160);
+      const ix = CX - OT.degToPx(hDeg, R), iy = CY - OT.degToPx(vDeg, R);
+      const ig = c.createRadialGradient(ix, iy, R * 0.35, ix, iy, R);
+      ig.addColorStop(0, '#5d5d5d'); ig.addColorStop(0.85, '#4a4a4a'); ig.addColorStop(1, '#333');
+      c.fillStyle = ig; c.beginPath(); c.arc(ix, iy, R, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#060606'; c.beginPath(); c.arc(ix, iy, R * 0.4, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#ffffff';
+      for (const dx of [-0.16, 0.16]) { c.beginPath(); c.arc(ix + dx * R, iy - 0.2 * R, R * 0.055, 0, Math.PI * 2); c.fill(); }
+      const lid = c.createLinearGradient(0, CY - 66, 0, CY - 40);
+      lid.addColorStop(0, 'rgba(40,40,40,0.55)'); lid.addColorStop(1, 'rgba(40,40,40,0)');
+      c.fillStyle = lid; c.fillRect(CX - 160, CY - 70, 320, 34);
+    }
+    c.restore();
+    c.strokeStyle = '#3c3c3c'; c.lineWidth = 3;
+    c.beginPath(); c.ellipse(CX, CY, 150, 66, 0, Math.PI * 1.04, Math.PI * 1.96); c.stroke();
+  }
+
+  // ---------- state ----------
+  const state = {
+    src: null,         // {kind, vw, vh, drawable, label}
+    iris: null,        // {x, y, r0}
+    ref: null,         // {x, y}
+    marking: 'iris',
+    result: null,
+    samples: null,
+    busy: false,
+  };
+  const vid = $('#vid');
+  const frameCanvas = $('#frame');
+  let downloads = null;
+
+  // ---------- tabs ----------
+  const tabs = ['analyze', 'stimulus', 'guide'];
+  function showTab(name) {
+    tabs.forEach(t => {
+      $('#tab-' + t).setAttribute('aria-selected', String(t === name));
+      $('#panel-' + t).hidden = t !== name;
+    });
+    if (name !== 'stimulus') stopStim();
+    if (name === 'stimulus') sizeStage();
+    if (name === 'analyze') drawStrip();
+    try { localStorage.setItem('ocutrace-tab', name); } catch (e) {}
+  }
+  tabs.forEach((t, i) => {
+    const b = $('#tab-' + t);
+    b.addEventListener('click', () => showTab(t));
+    b.addEventListener('keydown', e => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      showTab(next); $('#tab-' + next).focus();
+    });
+  });
+
+  // ---------- marking ----------
+  function irisRadius() { return state.iris ? state.iris.r0 * (+$('#irisSize').value / 100) : 0; }
+  function renderFrame() {
+    const src = state.src; if (!src) return;
+    const ctx = frameCanvas.getContext('2d');
+    const maxW = 960;
+    const scale = Math.min(1, maxW / src.vw);
+    frameCanvas.width = Math.round(src.vw * scale); frameCanvas.height = Math.round(src.vh * scale);
+    ctx.drawImage(src.drawable, 0, 0, frameCanvas.width, frameCanvas.height);
+    // Show the frame in grayscale, the way the tracker reads it.
+    try {
+      const im = ctx.getImageData(0, 0, frameCanvas.width, frameCanvas.height), d = im.data;
+      for (let j = 0; j < d.length; j += 4) { const v = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2]; d[j] = d[j + 1] = d[j + 2] = v; }
+      ctx.putImageData(im, 0, 0);
+    } catch (e) { /* leave the frame in color */ }
+    const k = frameCanvas.width / src.vw;
+    const lw = Math.max(2, frameCanvas.width / 320);
+    if (state.iris) {
+      const x = state.iris.x * k, y = state.iris.y * k, rr = irisRadius() * k;
+      ctx.strokeStyle = '#ff3b24'; ctx.lineWidth = lw;
+      ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x - rr - 6 * lw, y); ctx.lineTo(x - rr + 3 * lw, y); ctx.moveTo(x + rr - 3 * lw, y); ctx.lineTo(x + rr + 6 * lw, y);
+      ctx.moveTo(x, y - rr - 6 * lw); ctx.lineTo(x, y - rr + 3 * lw); ctx.moveTo(x, y + rr - 3 * lw); ctx.lineTo(x, y + rr + 6 * lw);
+      ctx.stroke();
+    }
+    if (state.ref) {
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = lw;
+      const s = 10 * lw, x = state.ref.x * k, y = state.ref.y * k;
+      ctx.strokeRect(x - s / 2, y - s / 2, s, s);
+    }
+    $('#markSource').textContent = `${src.label}, ${src.vw} × ${src.vh}`;
+    $('#trackBtn').disabled = !state.iris || state.busy;
+    $('#clearRefBtn').disabled = !state.ref || state.busy;
+  }
+  frameCanvas.addEventListener('pointerdown', e => {
+    if (!state.src || state.busy || !state.marking) return;
+    const rect = frameCanvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width * state.src.vw;
+    const y = (e.clientY - rect.top) / rect.height * state.src.vh;
+    if (state.marking === 'iris') {
+      const side = 0.6 * Math.min(state.src.vw, state.src.vh);
+      const c = cropGray(state.src.drawable, state.src.vw, state.src.vh, x, y, side, WIDE);
+      const est = OT.estimateRadius(c.g, WIDE, (x - c.sx) * c.s - 0.5, (y - c.sy) * c.s - 0.5, 3, 60);
+      state.iris = { x: c.sx + (est.x + 0.5) / c.s, y: c.sy + (est.y + 0.5) / c.s, r0: est.r / c.s };
+      $('#irisSize').value = 100;
+      state.marking = 'ref';
+      $('#markStatus').textContent = 'Iris marked. Adjust the outline if it does not sit on the iris edge, then tap a fixed point or track.';
+    } else {
+      state.ref = { x, y };
+      state.marking = null;
+      $('#markStatus').textContent = 'Fixed point marked. Ready to track.';
+    }
+    renderFrame();
+  });
+  $('#irisSize').addEventListener('input', renderFrame);
+  $('#markIrisBtn').addEventListener('click', () => { state.marking = 'iris'; $('#markStatus').textContent = 'Tap the center of one iris.'; renderFrame(); });
+  $('#markRefBtn').addEventListener('click', () => { state.marking = 'ref'; $('#markStatus').textContent = 'Tap a fixed point such as a sticker on the nose bridge.'; renderFrame(); });
+  $('#clearRefBtn').addEventListener('click', () => { state.ref = null; renderFrame(); });
+
+  // ---------- tracker ----------
+  function makeTracker(src, iris, r, ref) {
+    let cx = iris.x, cy = iris.y, rx = ref && ref.x, ry = ref && ref.y;
+    let refScore = null, tpl = null;
+    const TH = 12, SEARCH = 16;
+    let origin = null;
+    return function step(drawable) {
+      const c = cropGray(drawable, src.vw, src.vh, cx, cy, 6 * r, N);
+      const loc = OT.locateIris(c.g, N, (cx - c.sx) * c.s - 0.5, (cy - c.sy) * c.s - 0.5, r * c.s);
+      const nx = c.sx + (loc.x + 0.5) / c.s, ny = c.sy + (loc.y + 0.5) / c.s;
+      if (refScore === null && loc.score > 0) refScore = loc.score;
+      const conf = refScore ? loc.score / refScore : 0;
+      let ok = conf >= 0.45 && Math.hypot(nx - cx, ny - cy) <= 1.5 * r;
+      if (ok) { cx = nx; cy = ny; }
+      if (ref) {
+        const rc = cropGray(drawable, src.vw, src.vh, rx, ry, 6 * r, N);
+        const gx = (rx - rc.sx) * rc.s - 0.5, gy = (ry - rc.sy) * rc.s - 0.5;
+        if (!tpl) tpl = OT.cutTemplate(rc.g, N, gx, gy, TH);
+        const m = OT.matchTemplate(rc.g, N, tpl, TH, gx, gy, SEARCH);
+        if (Number.isFinite(m.sad)) { rx = rc.sx + (m.x + 0.5) / rc.s; ry = rc.sy + (m.y + 0.5) / rc.s; } else ok = false;
+      }
+      const ex = nx - (ref ? rx : 0), ey = ny - (ref ? ry : 0);
+      if (ok && !origin) origin = { x: ex, y: ey };
+      if (!ok || !origin) return { ok: false };
+      return { ok, dx: ex - origin.x, dy: ey - origin.y };
+    };
+  }
+  function toDeg(trk, r, mirrored) {
+    if (!trk.ok) return { x: NaN, y: NaN, ok: false };
+    return { x: OT.pxToDeg(mirrored ? trk.dx : -trk.dx, r), y: OT.pxToDeg(-trk.dy, r), ok: true };
+  }
+
+  async function trackSynthetic() {
+    const r = irisRadius();
+    const step = makeTracker(state.src, state.iris, r, state.ref);
+    const samples = [];
+    for (let i = 0; i < synWave.length; i++) {
+      const w = synWave[i];
+      drawSynEye(w.h, w.v, w.blink);
+      const d = toDeg(step(synCanvas), r, false);
+      samples.push({ t: w.t, ...d });
+      if (i % 40 === 0) { setProgress(i / synWave.length); await sleep(0); }
+    }
+    drawSynEye(synWave[0].h, synWave[0].v, false);
+    return samples;
+  }
+
+  function trackVideo() {
+    return new Promise((resolve, reject) => {
+      const r = irisRadius();
+      const F = +$('#slowmo').value || 1;
+      const mirrored = $('#mirrored').checked;
+      const step = makeTracker(state.src, state.iris, r, state.ref);
+      const samples = [];
+      const limit = Math.min(vid.duration || MAX_SECONDS * F, MAX_SECONDS * F);
+      let last = -1, done = false;
+      const finish = () => { if (done) return; done = true; vid.pause(); resolve(samples); };
+      const handle = mediaTime => {
+        if (mediaTime === last) return;
+        last = mediaTime;
+        samples.push({ t: mediaTime / F, ...toDeg(step(vid), r, mirrored) });
+        setProgress(mediaTime / limit);
+      };
+      vid.currentTime = 0;
+      if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
+        const onFrame = (now, meta) => {
+          if (done) return;
+          handle(meta.mediaTime);
+          if (meta.mediaTime >= limit) finish(); else vid.requestVideoFrameCallback(onFrame);
+        };
+        vid.addEventListener('ended', finish, { once: true });
+        vid.playbackRate = 0.5;
+        vid.requestVideoFrameCallback(onFrame);
+        vid.play().catch(err => { done = true; reject(err); });
+      } else {
+        (async () => {
+          const dt = 1 / 30;
+          for (let t = 0; t < limit; t += dt) {
+            await seek(t);
+            handle(vid.currentTime);
+          }
+          finish();
+        })().catch(reject);
+      }
+    });
+  }
+  function seek(t) {
+    return new Promise(res => {
+      const on = () => { vid.removeEventListener('seeked', on); res(); };
+      vid.addEventListener('seeked', on);
+      vid.currentTime = t;
+    });
+  }
+  function setProgress(f) { const p = $('#prog'), v = Math.max(0, Math.min(1, f)); p.hidden = false; p.firstElementChild.style.width = (v * 100).toFixed(1) + '%'; p.setAttribute('aria-valuenow', String(Math.round(v * 100))); }
+
+  $('#trackBtn').addEventListener('click', async () => {
+    if (!state.iris || state.busy) return;
+    state.busy = true; renderFrame();
+    $('#markStatus').textContent = state.src.kind === 'video' ? 'Tracking. The clip plays at half speed while each frame is measured.' : 'Tracking the synthetic eye.';
+    try {
+      const samples = state.src.kind === 'video' ? await trackVideo() : await trackSynthetic();
+      if (samples.length < 20) throw new Error('Too few frames were read from this clip. Try a longer recording.');
+      showResult(samples, state.src.label, state.src.kind === 'synthetic');
+      $('#markStatus').textContent = `Tracked ${samples.length} frames.`;
+    } catch (err) {
+      $('#markStatus').textContent = (err && err.message) || 'Tracking stopped. Try the clip again.';
+      $('#markStatus').classList.add('err');
+      setTimeout(() => $('#markStatus').classList.remove('err'), 6000);
+    } finally {
+      state.busy = false; $('#prog').hidden = true; renderFrame();
+      if (state.src.kind === 'video') { await seek(firstFrameTime()); renderFrame(); }
+    }
+  });
+
+  // ---------- sources ----------
+  function loadSynthetic() {
+    drawSynEye(synWave[0].h, synWave[0].v, false);
+    state.src = { kind: 'synthetic', vw: SYN.vw, vh: SYN.vh, drawable: synCanvas, label: 'Synthetic eye' };
+    // Pre-place marks the way a user would.
+    const side = 0.6 * Math.min(SYN.vw, SYN.vh);
+    const c = cropGray(synCanvas, SYN.vw, SYN.vh, SYN.CX + 4, SYN.CY - 3, side, WIDE);
+    const est = OT.estimateRadius(c.g, WIDE, (SYN.CX + 4 - c.sx) * c.s - 0.5, (SYN.CY - 3 - c.sy) * c.s - 0.5, 3, 60);
+    state.iris = { x: c.sx + (est.x + 0.5) / c.s, y: c.sy + (est.y + 0.5) / c.s, r0: est.r / c.s };
+    state.ref = { x: SYN.CX + 190, y: 60 };
+    state.marking = null;
+    $('#irisSize').value = 100;
+    $('#srcStatus').textContent = 'Below is a computer drawn eye, run through the same tracker, so you can see a complete reading before loading your own clip.';
+    $('#markStatus').textContent = 'The iris and the nose sticker are already marked on the synthetic eye. Track it again, or load your own clip above.';
+    renderFrame();
+  }
+  $('#synBtn').addEventListener('click', async () => {
+    if (state.busy) return;
+    loadSynthetic(); $('#trackBtn').click();
+  });
+
+  let objectUrl = null, triedDataUrl = false, pendingFile = null, loadTimer = null;
+  function firstFrameTime() { return Math.min(0.1, (vid.duration || 1) / 2); }
+  function onVideoFile(file) {
+    if (!file || state.busy) return;
+    pendingFile = file; triedDataUrl = false;
+    $('#srcStatus').classList.remove('err');
+    $('#srcStatus').textContent = `Opening ${file.name || 'video'}…`;
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    objectUrl = URL.createObjectURL(file);
+    vid.src = objectUrl; vid.load();
+    armLoadTimer();
+  }
+  function armLoadTimer() {
+    clearTimeout(loadTimer);
+    loadTimer = setTimeout(() => vid.dispatchEvent(new Event('error')), 10000);
+  }
+  vid.addEventListener('loadedmetadata', async () => {
+    clearTimeout(loadTimer);
+    if (!vid.videoWidth) { $('#srcStatus').textContent = 'This file has no video track.'; $('#srcStatus').classList.add('err'); return; }
+    await seek(firstFrameTime());
+    state.src = { kind: 'video', vw: vid.videoWidth, vh: vid.videoHeight, drawable: vid, label: pendingFile && pendingFile.name ? pendingFile.name : 'Your video' };
+    state.iris = null; state.ref = null; state.marking = 'iris';
+    describeVideo();
+    $('#markStatus').textContent = 'Tap the center of one iris.';
+    renderFrame();
+    $('#markCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  });
+  vid.addEventListener('error', () => {
+    clearTimeout(loadTimer);
+    if (!pendingFile || state.src && state.src.kind === 'video' && vid.videoWidth) return;
+    if (!triedDataUrl && pendingFile.size < 150e6) {
+      triedDataUrl = true;
+      const fr = new FileReader();
+      fr.onload = () => { vid.src = fr.result; vid.load(); armLoadTimer(); };
+      fr.readAsDataURL(pendingFile);
+      return;
+    }
+    $('#srcStatus').textContent = 'This browser could not open the clip. Try an MP4 or MOV recorded on the phone, or open the page in another browser.';
+    $('#srcStatus').classList.add('err');
+  });
+  $('#recInput').addEventListener('change', e => onVideoFile(e.target.files[0]));
+  $('#fileInput').addEventListener('change', e => onVideoFile(e.target.files[0]));
+  function describeVideo() {
+    if (!state.src || state.src.kind !== 'video') return;
+    const F = +$('#slowmo').value || 1, secs = vid.duration / F, limit = Math.min(secs, MAX_SECONDS);
+    $('#srcStatus').textContent = `${vid.videoWidth} × ${vid.videoHeight}, ${fmt(secs, 1)} s of real time` +
+      (secs > MAX_SECONDS ? `. Only the first ${MAX_SECONDS} s will be analyzed.` : '.') +
+      ` Tracking takes about ${fmt(limit * F * 2, 0)} s.`;
+  }
+  $('#slowmo').addEventListener('change', describeVideo);
+
+  // ---------- results ----------
+  const SLOW_DIR = { 'Right-beating': 'leftward', 'Left-beating': 'rightward', 'Upbeat': 'downward', 'Downbeat': 'upward' };
+  const FAST_DIR = { 'Right-beating': 'rightward', 'Left-beating': 'leftward', 'Upbeat': 'upward', 'Downbeat': 'downward' };
+  function showResult(samples, label, synthetic) {
+    state.samples = samples;
+    const res = OT.analyze(samples);
+    state.result = res;
+    $('#resultSource').textContent = synthetic
+      ? 'Synthetic eye with right-beating nystagmus built in at 6°/s and 2.5 beats/s. Not patient data.'
+      : `${label}, ${fmt(res.duration, 1)} s at ${fmt(res.fps, 0)} fps.`;
+    const ny = res.nyst, call = $('#verdictText');
+    $('#verdictBox').className = 'verdict' + (ny.present ? ' found' : '');
+    if (ny.present) {
+      call.className = 'call';
+      call.textContent = `${ny.direction} nystagmus`;
+      $('#verdictSub').textContent = `Slow phases drift ${SLOW_DIR[ny.direction]} at ${fmt(Math.abs(ny.medSpv))}°/s, ${fmt(ny.beatHz)} beats per second. A prototype reading, not a diagnosis.`;
+    } else {
+      call.className = 'call';
+      call.textContent = 'No nystagmus pattern';
+      const drift = Math.max(Math.abs(res.h.medSpv) || 0, Math.abs(res.v.medSpv) || 0);
+      $('#verdictSub').textContent = `Drift between fast events peaked at ${fmt(drift)}°/s, with no consistent beat direction above the 2°/s cutoff. A prototype reading, not a diagnosis.`;
+    }
+    const axisName = ny.axis === 'h' ? 'horizontal' : 'vertical';
+    const rows = [
+      ['Slow phase velocity', fmt(Math.abs(ny.medSpv)), '°/s', ny.spv.length ? `Median of ${ny.spv.length} slow phases, ${axisName}` : 'No clean slow phases between events'],
+      ['Beat frequency', fmt(ny.beatHz), 'beats/s', ny.fastCount ? `${ny.fastCount} ${FAST_DIR[ny.direction]} fast phases` : 'No fast phases found'],
+      ['Square wave jerks', fmt(res.swjPerMin, 0), 'per min', `${res.swj} found. Read only from fixation recordings`],
+      ['Fast events', String(res.events.length), '', res.events.length ? `Median peak speed ${fmt(res.medianPeakVel, 0)}°/s` : 'None above threshold'],
+      ['Frames tracked', fmt(res.validPct * 100, 0), '%', `${res.n} frames over ${fmt(res.duration, 1)} s`],
+      ['Frame rate', fmt(res.fps, 0), 'fps', synthetic ? 'Synthetic clip' : 'After slow motion correction'],
+    ];
+    const mb = $('#measures tbody'); mb.innerHTML = '';
+    for (const [name, v, unit, basis] of rows) {
+      const tr = document.createElement('tr');
+      const a = document.createElement('td'); a.textContent = name;
+      const b = document.createElement('td'); b.className = 'val'; b.textContent = v;
+      if (unit) { const s = document.createElement('span'); s.textContent = unit; b.appendChild(s); }
+      const c = document.createElement('td'); c.className = 'basis'; c.textContent = basis;
+      tr.append(a, b, c); mb.appendChild(tr);
+    }
+    const note = $('#fpsNote');
+    if (res.fps < 100) {
+      note.hidden = false;
+      note.innerHTML = '<svg width="18" height="18" viewBox="0 0 28 28" aria-hidden="true"><path d="M14 2 L27 25 H1 Z" fill="#ffd200" stroke="#7a5c00" stroke-linejoin="round"/><rect x="12.6" y="9" width="2.8" height="9" fill="#000"/><circle cx="14" cy="21.3" r="1.6" fill="#000"/></svg><span></span>';
+      note.lastChild.textContent = `At ${fmt(res.fps, 0)} fps, peak speeds read low and brief saccades can be missed. Record in 240 fps slow motion when saccade speed matters.`;
+    }
+    else note.hidden = true;
+
+    const tb = $('#evTable tbody'); tb.innerHTML = '';
+    res.events.slice(0, 40).forEach(e => {
+      const tr = document.createElement('tr');
+      [[fmt(e.t, 2), 1], [isFastPhase(e) ? 'Fast phase' : 'Saccade', 0], [dirOf(e), 0], [fmt(e.amp, 2), 1], [fmt(e.peakVel, 0), 1]].forEach(([txt, num]) => {
+        const td = document.createElement('td'); td.textContent = txt; if (num) td.className = 'num'; tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    $('#evSummary').textContent = `Fast events (${res.events.length})`;
+    $('#evMore').textContent = res.events.length > 40 ? `${res.events.length - 40} more are in the CSV.` : (res.events.length ? '' : 'No fast events crossed the threshold.');
+    $('#csvBox').hidden = true; $('#csvStatus').textContent = '';
+    $('#strip').setAttribute('aria-label', `Recorder strip, ${fmt(res.duration, 1)} seconds. ${call.textContent}.`);
+    drawStrip();
+  }
+  function isFastPhase(e) {
+    const ny = state.result && state.result.nyst; if (!ny || !ny.present) return false;
+    const comp = ny.axis === 'h' ? e.dx : e.dy;
+    const sign = (ny.direction === 'Right-beating' || ny.direction === 'Upbeat') ? 1 : -1;
+    return Math.sign(comp) === sign && Math.abs(comp) >= 0.5;
+  }
+  const dirOf = e => Math.abs(e.dx) >= Math.abs(e.dy) ? (e.dx > 0 ? 'Right' : 'Left') : (e.dy > 0 ? 'Up' : 'Down');
+
+  // ---------- recorder strip ----------
+  function niceStep(span, target) {
+    const raw = span / target, p = Math.pow(10, Math.floor(Math.log10(raw)));
+    const m = raw / p; return (m < 1.5 ? 1 : m < 3 ? 2 : m < 7 ? 5 : 10) * p;
+  }
+  function drawStrip() {
+    const res = state.result; if (!res || $('#panel-analyze').hidden) return;
+    const paper = $('#paper'), cv = $('#strip');
+    const t = res.t, t0 = t[0], t1 = t[t.length - 1] || 1, dur = Math.max(0.5, t1 - t0);
+    const GUT = 66, RIGHT = 10, TOP = 8, AXIS = 28;
+    const viewW = paper.clientWidth || 600;
+    const W = Math.max(viewW, Math.round(GUT + RIGHT + dur * 45));
+    let limH = 1, limV = 1, spMax = res.threshold * 1.5;
+    for (let i = 0; i < res.n; i++) if (res.ok[i]) { limH = Math.max(limH, Math.abs(res.x[i])); limV = Math.max(limV, Math.abs(res.y[i])); }
+    for (const v of res.sp) if (Number.isFinite(v)) spMax = Math.max(spMax, v);
+    limH = Math.ceil(limH * 1.1); limV = Math.ceil(limV * 1.1);
+    const ink = css('--graph-label'), ink2 = css('--graph-sep'), red = css('--graph-ev'), blue = css('--graph-v'), pen = css('--graph-h');
+    const minor = css('--graph-minor'), major = css('--graph-major'), bg = css('--graph-bg');
+    const family = css('--font') || 'sans-serif';
+    const chans = [
+      { name: 'Horizontal', unit: '°', h: 132, lo: -limH, hi: limH, data: res.x, color: pen, width: 1.7, up: 'R', down: 'L' },
+      { name: 'Vertical', unit: '°', h: 92, lo: -limV, hi: limV, data: res.y, color: blue, width: 1.5, up: 'Up', down: 'Dn' },
+      { name: 'Events', h: 32 },
+      { name: 'Speed', unit: '°/s', h: 104, lo: 0, hi: spMax * 1.08, data: res.sp, color: pen, width: 1.3 },
+    ];
+    const H = TOP + chans.reduce((a, c) => a + c.h, 0) + AXIS;
+    const dpr = window.devicePixelRatio || 1;
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    const X = v => GUT + (v - t0) / dur * (W - GUT - RIGHT);
+    const xs = niceStep(dur, Math.max(3, Math.floor((W - GUT - RIGHT) / 70)));
+    const hline = (y, x0, x1, col, w = 1) => { ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(x0, Math.round(y) + 0.5); ctx.lineTo(x1, Math.round(y) + 0.5); ctx.stroke(); };
+    const vline = (x, y0, y1, col, w = 1) => { ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, y0); ctx.lineTo(Math.round(x) + 0.5, y1); ctx.stroke(); };
+    const steps = (lo, hi, st, fn) => { for (let v = Math.ceil(lo / st - 1e-9) * st; v <= hi + 1e-9; v += st) fn(+v.toFixed(6)); };
+
+    let top = TOP;
+    for (const c of chans) {
+      const bot = top + c.h;
+      const Y = c.data ? (v => top + 7 + (1 - (v - c.lo) / (c.hi - c.lo)) * (c.h - 14)) : null;
+      const ys = c.data ? niceStep(c.hi - c.lo, c.h > 110 ? 4 : 2) : 0;
+      // chart paper: minor then major
+      steps(t0, t1, xs / 5, v => vline(X(v), top, bot, minor));
+      if (Y) steps(c.lo, c.hi, ys / 5, v => hline(Y(v), GUT, W - RIGHT, minor));
+      steps(t0, t1, xs, v => vline(X(v), top, bot, major));
+      if (Y) steps(c.lo, c.hi, ys, v => hline(Y(v), GUT, W - RIGHT, major));
+      // blinks and lost frames
+      ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.14;
+      for (let i = 0; i < res.n; i++) if (!res.ok[i]) { const xa = X(t[Math.max(0, i - 1)]), xb = X(t[Math.min(res.n - 1, i + 1)]); ctx.fillRect(xa, top, Math.max(1.5, xb - xa), c.h); }
+      ctx.globalAlpha = 1;
+      // gutter labels
+      ctx.fillStyle = ink; ctx.font = `600 12.5px ${family}`;
+      if (c.data) {
+        ctx.save(); ctx.translate(14, (top + bot) / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(c.name, 0, 0); ctx.restore();
+        ctx.font = `400 11px ${family}`; ctx.fillStyle = ink; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        steps(c.lo, c.hi, ys, v => ctx.fillText(`${v > 0 && c.lo < 0 ? '+' : ''}${+v.toFixed(2)}${c.unit}`, GUT - 7, Y(v)));
+      } else {
+        ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(c.name, GUT - 7, (top + bot) / 2);
+      }
+      if (c.up) {
+        ctx.font = `600 11px ${family}`; ctx.fillStyle = ink; ctx.textAlign = 'left';
+        ctx.textBaseline = 'top'; ctx.fillText(c.up, GUT + 5, top + 3);
+        ctx.textBaseline = 'bottom'; ctx.fillText(c.down, GUT + 5, bot - 3);
+      }
+      // pens
+      if (c.name === 'Speed') {
+        ctx.setLineDash([6, 4]); hline(Y(res.threshold), GUT, W - RIGHT, red, 1.2); ctx.setLineDash([]);
+      }
+      if (c.data) {
+        ctx.strokeStyle = c.color; ctx.lineWidth = c.width; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.beginPath();
+        let pen = false;
+        for (let i = 0; i < t.length; i++) {
+          const v = c.data[i];
+          if (!Number.isFinite(v)) { pen = false; continue; }
+          const px = X(t[i]), py = Y(Math.max(c.lo, Math.min(c.hi, v)));
+          if (pen) ctx.lineTo(px, py); else { ctx.moveTo(px, py); pen = true; }
+        }
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = red;
+        for (const e of res.events) {
+          const full = isFastPhase(e), x = X((e.t + e.tEnd) / 2), hh = full ? c.h - 10 : (c.h - 10) * 0.5;
+          ctx.fillRect(Math.round(x) - 1, bot - 5 - hh, 2.5, hh);
+        }
+      }
+      if (c.name === 'Speed') {
+        ctx.font = `400 11px ${family}`; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+        const lab = `threshold ${fmt(res.threshold, 0)}°/s`, lw = ctx.measureText(lab).width;
+        ctx.fillStyle = bg; ctx.fillRect(GUT + 22, Y(res.threshold) - 16, lw + 8, 13);
+        ctx.fillStyle = red; ctx.fillText(lab, GUT + 26, Y(res.threshold) - 3);
+      }
+      hline(bot, 0, W, ink2, 1);
+      top = bot;
+    }
+    // time axis
+    ctx.font = `400 11px ${family}`; ctx.fillStyle = ink; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    steps(t0, t1, xs, v => ctx.fillText(`${+v.toFixed(2)} s`, Math.min(W - RIGHT - 12, Math.max(GUT + 10, X(v))), top + 8));
+  }
+  new ResizeObserver(() => drawStrip()).observe($('#paper'));
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawStrip);
+  new MutationObserver(drawStrip).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawStrip);
+
+  // ---------- CSV ----------
+  function buildCsv() {
+    const res = state.result; if (!res) return '';
+    const evAt = new Array(res.n).fill('');
+    res.events.forEach((e, k) => { for (let i = e.i0; i <= e.i1; i++) evAt[i] = String(k + 1); });
+    const rows = ['t_s,h_deg,v_deg,valid,interpolated,speed_deg_s,event'];
+    for (let i = 0; i < res.n; i++) {
+      rows.push([res.t[i].toFixed(4), res.ok[i] ? res.x[i].toFixed(3) : '', res.ok[i] ? res.y[i].toFixed(3) : '', res.ok[i] ? 1 : 0, res.interp[i] ? 1 : 0, Number.isFinite(res.sp[i]) ? res.sp[i].toFixed(1) : '', evAt[i]].join(','));
+    }
+    return rows.join('\n') + '\n';
+  }
+  function csvName() {
+    const base = (state.src && state.src.kind === 'video' ? state.src.label.replace(/\.[^.]+$/, '') : 'synthetic-eye').replace(/[^\w-]+/g, '-').slice(0, 60);
+    return `ocutrace-${base}-${new Date().toISOString().slice(0, 10)}.csv`;
+  }
+  $('#saveCsv').addEventListener('click', async () => {
+    if (!downloads) return;
+    try { await downloads.save({ filename: csvName(), data: buildCsv() }); $('#csvStatus').textContent = 'Saved.'; }
+    catch (e) { $('#csvStatus').textContent = e && e.code === 'declined' ? 'Save cancelled.' : 'Saving is not available here. Use Copy instead.'; }
+  });
+  $('#copyCsv').addEventListener('click', () => {
+    const text = buildCsv();
+    const fallback = () => { const box = $('#csvBox'); box.hidden = false; box.value = text; box.focus(); box.select(); $('#csvStatus').textContent = 'Copying is blocked here. The CSV is selected below; copy it from the box.'; };
+    try {
+      navigator.clipboard.writeText(text).then(() => { $('#csvStatus').textContent = `Copied ${state.result.n} rows.`; }, fallback);
+    } catch (e) { fallback(); }
+  });
+  if (window.claude && typeof window.claude.use === 'function') {
+    window.claude.use('downloads').then(d => { downloads = d; $('#saveCsv').hidden = !d; }).catch(() => {});
+  } else {
+    // Ordinary web page (for example GitHub Pages): save through a download link.
+    downloads = {
+      save: async ({ filename, data }) => {
+        const url = URL.createObjectURL(new Blob([data], { type: 'text/csv' }));
+        const a = document.createElement('a'); a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        return { status: 'saved' };
+      },
+    };
+    $('#saveCsv').hidden = false;
+  }
+
+  // ---------- stimulus ----------
+  const stage = $('#stage'), stim = $('#stim'), hud = $('#hud');
+  let stimRun = null, wakeLock = null;
+  function sizeStage() {
+    const dpr = window.devicePixelRatio || 1;
+    stim.width = Math.round(stim.clientWidth * dpr); stim.height = Math.round(stim.clientHeight * dpr);
+    if (!stimRun) drawStim(0, $('#task').value, true);
+  }
+  new ResizeObserver(sizeStage).observe(stage);
+  function rng(seed) { let s = seed; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
+  function sacSchedule(seed) { const r = rng(seed), out = []; let t = 1; let side = 1; while (t < 40) { out.push({ t, side }); t += 1 + r(); side = side === 0 ? (r() < 0.5 ? 1 : -1) : 0; } return out; }
+  const sacPlan = sacSchedule(11);
+  const gazePlan = [[0, 0, 3, 'Center'], [1, 0, 10, 'Right gaze'], [0, 0, 3, 'Center'], [-1, 0, 10, 'Left gaze'], [0, 0, 3, 'Center'], [0, 1, 10, 'Up gaze'], [0, 0, 3, 'Center'], [0, -1, 10, 'Down gaze'], [0, 0, 3, 'Center']];
+  const TASK_LEN = { fixation: 20, gaze: gazePlan.reduce((a, g) => a + g[2], 0), sacH: 40, sacV: 40, pursuit: 20, okn: 30 };
+  function dot(ctx, x, y, s) {
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#e0261b'; ctx.beginPath(); ctx.arc(x, y, s * 0.35, 0, Math.PI * 2); ctx.fill();
+  }
+  function drawStim(t, task, idle) {
+    const ctx = stim.getContext('2d'), W = stim.width, H = stim.height;
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    const s = Math.max(6, Math.min(W, H) * 0.018), cx = W / 2, cy = H / 2, ax = W * 0.42, ay = H * 0.38;
+    let label = '';
+    if (task === 'okn') {
+      const dir = +$('#oknDir').value, sw = W * 0.06, off = ((t * W * 0.25 * dir) % (2 * sw) + 2 * sw) % (2 * sw);
+      ctx.fillStyle = '#ffffff';
+      for (let x = -2 * sw + off; x < W + 2 * sw; x += 2 * sw) ctx.fillRect(x, 0, sw, H);
+      label = dir > 0 ? 'Stripes moving right' : 'Stripes moving left';
+    } else if (task === 'fixation') { dot(ctx, cx, cy, s); label = 'Look at the dot'; }
+    else if (task === 'pursuit') { dot(ctx, cx + (idle ? 0 : ax * Math.sin(2 * Math.PI * 0.4 * t)), cy, s); label = 'Follow the dot'; }
+    else if (task === 'gaze') {
+      let acc = 0, cur = gazePlan[0];
+      for (const g of gazePlan) { if (t < acc + g[2]) { cur = g; break; } acc += g[2]; cur = g; }
+      dot(ctx, cx + cur[0] * ax, cy - cur[1] * ay, s); label = cur[3];
+    } else {
+      let cur = { side: 0 };
+      for (const p of sacPlan) { if (p.t <= t) cur = p; else break; }
+      const vert = task === 'sacV';
+      dot(ctx, cx + (vert ? 0 : cur.side * ax), cy - (vert ? cur.side * ay : 0), s); label = 'Jump to the dot';
+    }
+    return label;
+  }
+  async function startStim() {
+    stopStim();
+    const task = $('#task').value, len = TASK_LEN[task], t0 = performance.now();
+    try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { wakeLock = null; }
+    const frame = () => {
+      const t = (performance.now() - t0) / 1000;
+      const label = drawStim(t, task, false);
+      hud.textContent = `${label} · ${Math.max(0, len - t).toFixed(0)} s left`;
+      if (t >= len) { stopStim(); hud.textContent = 'Done'; return; }
+      stimRun = requestAnimationFrame(frame);
+    };
+    stimRun = requestAnimationFrame(frame);
+  }
+  function stopStim() {
+    if (stimRun) cancelAnimationFrame(stimRun);
+    stimRun = null; hud.textContent = 'Ready';
+    if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+    if (stim.width) drawStim(0, $('#task').value, true);
+  }
+  $('#stimStart').addEventListener('click', startStim);
+  $('#stimStop').addEventListener('click', stopStim);
+  $('#task').addEventListener('change', stopStim);
+  $('#oknDir').addEventListener('change', () => { if (!stimRun) drawStim(0, 'okn', true); });
+  $('#stimFull').addEventListener('click', () => {
+    const p = stage.requestFullscreen ? stage.requestFullscreen() : null;
+    if (p && p.catch) p.catch(() => { $('#stimStatus').textContent = 'Full screen is not available here. Rotate the device or enlarge the window instead.'; });
+    else if (!p) $('#stimStatus').textContent = 'Full screen is not available here. Rotate the device or enlarge the window instead.';
+  });
+  document.addEventListener('fullscreenchange', sizeStage);
+
+  // ---------- boot ----------
+  let startTab = 'analyze';
+  try { const s = localStorage.getItem('ocutrace-tab'); if (tabs.includes(s)) startTab = s; } catch (e) {}
+  loadSynthetic();
+  showTab(startTab);
+  (async () => {
+    state.busy = true;
+    const samples = await trackSynthetic();
+    state.busy = false; $('#prog').hidden = true;
+    showResult(samples, state.src.label, true);
+    renderFrame();
+  })();
+})();
+
+</script>
+</body>
+</html>

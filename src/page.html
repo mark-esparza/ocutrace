@@ -1,0 +1,296 @@
+<title>OcuTrace</title>
+<style>
+/* Layout: one plain white column. Headings are black with red accents; red is reserved for marks that need attention. Single light theme, as requested. */
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --text: #111111;
+  --text-dim: #555555;
+  --red: #c8102e;
+  --rule: #e2e2e2;
+  --field: #b9b9b9;
+  --graph-bg: #ffffff;
+  --graph-minor: #f0f0f0;
+  --graph-major: #d6d6d6;
+  --graph-h: #111111;
+  --graph-v: #8c8c8c;
+  --graph-ev: #c8102e;
+  --graph-label: #333333;
+  --graph-sep: #bdbdbd;
+  --font: Tahoma, Verdana, "Segoe UI", Geneva, sans-serif;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 15px; line-height: 1.5; }
+.page { max-width: 780px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 56px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+
+/* heading */
+.masthead { display: grid; gap: 6px; padding-bottom: 14px; border-bottom: 3px solid var(--text); }
+.masthead h1 { margin: 0; font-size: 34px; font-weight: bold; letter-spacing: -0.02em; line-height: 1.1; color: var(--text); }
+.masthead h1 span { color: var(--red); }
+.masthead p { margin: 0; color: var(--text-dim); max-width: 60ch; }
+.masthead .caveat { color: var(--red); font-size: 14px; }
+
+/* tabs */
+.tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--rule); overflow-x: auto; }
+.tabs button { font: bold 15px var(--font); color: var(--text-dim); background: none; border: 0; padding: 10px 0 11px; margin-bottom: -1px; border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--red); }
+
+.panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 36px; }
+.group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+.group > h2 { margin: 0; font-size: 20px; font-weight: bold; color: var(--text); line-height: 1.25; }
+.group > h2 .n { color: var(--red); margin-right: 6px; }
+.hint { margin: 0; color: var(--text-dim); max-width: 64ch; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* buttons */
+.btn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 16px; font: bold 14px var(--font); color: var(--text); background: var(--bg); border: 1.5px solid var(--text); border-radius: 4px; cursor: pointer; }
+.btn:hover { background: #f3f3f3; }
+.btn.default { background: var(--text); color: #fff; }
+.btn.default:hover { background: #333; }
+.btn:disabled { color: #9a9a9a; border-color: #cfcfcf; background: #f7f7f7; cursor: default; }
+.btn input[type=file] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.btn .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--red); }
+.link { background: none; border: 0; padding: 4px 0; font: 14px var(--font); color: var(--text); text-decoration: underline; text-decoration-color: var(--red); text-underline-offset: 3px; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+
+.settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 20px; }
+.field { display: grid; gap: 4px; font-size: 14px; }
+select { font: 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--field); border-radius: 4px; padding: 8px; min-height: 42px; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 14px; min-height: 42px; }
+.check input { width: 17px; height: 17px; accent-color: var(--red); }
+input[type=range] { width: 100%; accent-color: var(--red); }
+.status { margin: 0; font-size: 14px; color: var(--text-dim); min-height: 1.5em; }
+.status.err { color: var(--red); }
+
+.sunken { border: 1px solid var(--rule); border-radius: 4px; }
+.viewfinder { position: relative; background: #000; overflow: hidden; }
+#frame { display: block; width: 100%; height: auto; touch-action: manipulation; cursor: crosshair; }
+.viewfinder .readout { position: absolute; left: 8px; bottom: 8px; font-size: 12px; color: #fff; background: rgb(0 0 0 / 0.65); padding: 2px 6px; pointer-events: none; max-width: calc(100% - 16px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.progress { height: 6px; background: var(--rule); border-radius: 3px; overflow: hidden; }
+.progress .bar { height: 100%; width: 0; background: var(--text); }
+
+/* results */
+.verdict { display: grid; gap: 4px; padding-left: 14px; border-left: 4px solid var(--text); }
+.verdict.found { border-left-color: var(--red); }
+.verdict svg { display: none; }
+.call { margin: 0; font-size: 24px; font-weight: bold; line-height: 1.2; color: var(--text); }
+.verdict.found .call { color: var(--red); }
+.callsub { margin: 0; max-width: 62ch; }
+.source { margin: 0; font-size: 14px; color: var(--text-dim); }
+.strip { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
+.strip .graph { overflow-x: auto; background: var(--graph-bg); }
+.strip canvas { display: block; }
+.strip figcaption { font-size: 13px; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.strip figcaption i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; background: var(--c); }
+.listview { overflow-x: auto; border: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { text-align: left; font-weight: bold; padding: 8px 10px 8px 0; border-bottom: 2px solid var(--text); white-space: nowrap; }
+td { padding: 8px 10px 8px 0; vertical-align: top; border-bottom: 1px solid var(--rule); }
+td.val { white-space: nowrap; font-weight: bold; }
+td.val span { font-weight: normal; margin-left: 3px; }
+td.basis { color: var(--text-dim); }
+.num { text-align: right; padding-left: 10px; padding-right: 0; }
+.warn { margin: 0; padding-left: 12px; border-left: 3px solid var(--red); max-width: 66ch; }
+.warn svg { display: none; }
+details { display: grid; gap: 8px; border-top: 1px solid var(--rule); padding-top: 12px; }
+summary { cursor: pointer; font-weight: bold; }
+details ul { margin: 8px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+details li { max-width: 68ch; }
+details .listview { margin-top: 8px; }
+textarea#csvBox { width: 100%; min-height: 110px; font: 12px "Courier New", monospace; background: var(--bg); color: var(--text); border: 1px solid var(--field); border-radius: 4px; padding: 8px; }
+
+/* stimulus */
+.stage { position: relative; background: #000; overflow: hidden; aspect-ratio: 16 / 9; max-width: 100%; }
+.stage canvas { width: 100%; height: 100%; display: block; }
+.stage .hud { position: absolute; left: 8px; top: 8px; font-size: 12px; color: #e6e6e6; background: rgb(0 0 0 / 0.72); padding: 2px 6px; pointer-events: none; }
+.stage:fullscreen { aspect-ratio: auto; }
+
+/* guide */
+.group ol { margin: 0; padding-left: 22px; display: grid; gap: 8px; }
+.group li { max-width: 66ch; }
+dl { margin: 0; display: grid; gap: 12px; }
+dt { font-weight: bold; }
+dd { margin: 2px 0 0; color: var(--text-dim); max-width: 64ch; }
+
+footer { border-top: 1px solid var(--rule); padding-top: 14px; font-size: 13px; color: var(--text-dim); }
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <h1>Ocu<span>Trace</span></h1>
+    <p>Turns a phone video of the eyes into a nystagmus and saccade recording.</p>
+    <p class="caveat">Research prototype. Not a medical device and not for diagnosis.</p>
+  </header>
+
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button role="tab" id="tab-analyze" aria-controls="panel-analyze" aria-selected="true">Analyze</button>
+      <button role="tab" id="tab-stimulus" aria-controls="panel-stimulus" aria-selected="false">Stimulus</button>
+      <button role="tab" id="tab-guide" aria-controls="panel-guide" aria-selected="false">Guide</button>
+    </nav>
+
+    <div>
+      <!-- ANALYZE -->
+      <div id="panel-analyze" class="panel" role="tabpanel" aria-labelledby="tab-analyze">
+        <section class="group" aria-labelledby="h-load">
+          <h2 id="h-load"><span class="n">1</span>Load a video of the eyes</h2>
+          <p class="hint">Record with the phone camera or pick a clip you already have. The video is read in this page and never uploaded.</p>
+          <div class="row">
+            <label class="btn default" for="recInput"><span class="dot" aria-hidden="true"></span>Record video<input id="recInput" type="file" accept="video/*" capture="user"></label>
+            <label class="btn" for="fileInput">Choose a clip<input id="fileInput" type="file" accept="video/*"></label>
+            <button class="link" id="synBtn" type="button">Replay the synthetic eye</button>
+          </div>
+          <div class="settings">
+            <label class="field" for="slowmo">Capture speed
+              <select id="slowmo">
+                <option value="1">Normal video</option>
+                <option value="4">Slow motion, 120 fps (plays 4× slower)</option>
+                <option value="8">Slow motion, 240 fps (plays 8× slower)</option>
+              </select>
+            </label>
+            <label class="check" for="mirrored"><input type="checkbox" id="mirrored">The clip is mirrored like a selfie preview</label>
+          </div>
+          <p class="status" id="srcStatus" role="status"></p>
+          <video id="vid" muted playsinline preload="auto" style="position:absolute;width:2px;height:2px;opacity:0.01;pointer-events:none;left:0;top:0"></video>
+        </section>
+
+        <section class="group" id="markCard" aria-labelledby="h-mark">
+          <h2 id="h-mark"><span class="n">2</span>Mark the eye</h2>
+          <p class="hint">Tap the center of one iris, then a fixed point on the face such as a sticker on the nose bridge.</p>
+          <div class="viewfinder sunken">
+            <canvas id="frame" width="480" height="320" aria-label="Grayscale first frame, as the tracker sees it. Tap to place marks."></canvas>
+            <span class="readout" id="markSource">Synthetic eye</span>
+          </div>
+          <p class="status" id="markStatus" role="status"></p>
+          <label class="field" for="irisSize">Iris outline: drag until the red ring sits on the iris edge
+            <input type="range" id="irisSize" min="60" max="160" value="100">
+          </label>
+          <div class="row">
+            <button class="btn default" id="trackBtn" type="button">Track eye movements</button>
+            <button class="btn" id="markIrisBtn" type="button">Re-mark iris</button>
+            <button class="btn" id="markRefBtn" type="button">Mark fixed point</button>
+            <button class="btn" id="clearRefBtn" type="button">Clear fixed point</button>
+          </div>
+          <div class="progress" id="prog" hidden role="progressbar" aria-label="Tracking progress" aria-valuemin="0" aria-valuemax="100"><div class="bar"></div></div>
+        </section>
+
+        <section class="group" id="resultCard" aria-labelledby="h-read">
+          <h2 id="h-read"><span class="n">3</span>Read the recording</h2>
+          <p class="source" id="resultSource">Synthetic eye with right-beating nystagmus built in at 6°/s and 2.5 beats/s.</p>
+          <div class="verdict" id="verdictBox">
+            <svg class="icon-info" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="12.5" fill="#2f6fd6" stroke="#0b3c96"/><rect x="12.4" y="12" width="3.2" height="9" fill="#fff"/><circle cx="14" cy="8.2" r="1.9" fill="#fff"/></svg>
+            <svg class="icon-warn" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M14 2 L27 25 H1 Z" fill="#ffd200" stroke="#7a5c00" stroke-linejoin="round"/><rect x="12.6" y="9" width="2.8" height="9" fill="#000"/><circle cx="14" cy="21.3" r="1.6" fill="#000"/></svg>
+            <div>
+              <p class="call" id="verdictText">Tracking the sample...</p>
+              <p class="callsub" id="verdictSub"></p>
+            </div>
+          </div>
+          <figure class="strip">
+            <div class="graph sunken" id="paper"><canvas id="strip" role="img" aria-label="Eye position and speed over time"></canvas></div>
+            <figcaption>
+              <span><i style="--c:var(--graph-h)"></i>Horizontal, up is the patient's right</span>
+              <span><i style="--c:var(--graph-v)"></i>Vertical, up is up</span>
+              <span><i style="--c:var(--graph-ev)"></i>Fast phase or saccade</span>
+            </figcaption>
+          </figure>
+          <div class="listview sunken">
+            <table id="measures">
+              <thead><tr><th>Measure</th><th>Value</th><th>Basis</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <p class="warn" id="fpsNote" hidden></p>
+          <div class="row">
+            <button class="btn" id="saveCsv" type="button" hidden>Save trace as CSV</button>
+            <button class="btn" id="copyCsv" type="button">Copy trace as CSV</button>
+          </div>
+          <p class="status" id="csvStatus" role="status"></p>
+          <textarea id="csvBox" hidden readonly aria-label="Trace CSV"></textarea>
+          <details id="evDetails">
+            <summary id="evSummary">Fast events</summary>
+            <div class="listview sunken"><table id="evTable"><thead><tr><th class="num">Time (s)</th><th>Type</th><th>Direction</th><th class="num">Size (°)</th><th class="num">Peak (°/s)</th></tr></thead><tbody></tbody></table></div>
+            <p class="status" id="evMore"></p>
+          </details>
+          <details>
+            <summary>How these numbers are computed</summary>
+            <ul>
+              <li>Each frame, the iris is found as the darkest disk against a brighter surround, then refined to sub-pixel accuracy from the centroid of its dark pixels. Frames where iris contrast drops below 45% of the first frame count as blinks.</li>
+              <li>When a fixed point is marked, it is followed by template matching and subtracted, which removes head movement.</li>
+              <li>Pixels become degrees by assuming an 11.7 mm iris and a 12 mm eye radius. Treat degrees as approximate until checked against a lab tracker.</li>
+              <li>A fast event is any stretch where speed exceeds the larger of 20°/s and the median speed plus six robust standard deviations.</li>
+              <li>Nystagmus is called when at least three fast phases go one way (70% agreement) and the median slow phase velocity between them is at least 2°/s the other way.</li>
+              <li>Square wave jerks are opposite horizontal saccade pairs of 0.5° to 5°, similar in size, 150 to 500 ms apart.</li>
+              <li>Torsional nystagmus is not measured. Below about 240 fps, peak speeds read low and brief saccades can be missed.</li>
+            </ul>
+          </details>
+        </section>
+      </div>
+
+      <!-- STIMULUS -->
+      <div id="panel-stimulus" class="panel" role="tabpanel" aria-labelledby="tab-stimulus" hidden>
+        <section class="group" aria-labelledby="h-stim">
+          <h2 id="h-stim">Stimulus screen</h2>
+          <p class="hint">Run this on a laptop or tablet at eye level, 50 to 70 cm from the patient, while a phone records their eyes.</p>
+          <div class="settings">
+            <label class="field" for="task">Task
+              <select id="task">
+                <option value="fixation">Fixation, 20 s</option>
+                <option value="gaze">Gaze holding: right, left, up, down</option>
+                <option value="sacH">Saccades, horizontal</option>
+                <option value="sacV">Saccades, vertical</option>
+                <option value="pursuit">Smooth pursuit, 0.4 Hz</option>
+                <option value="okn">Optokinetic stripes</option>
+              </select>
+            </label>
+            <label class="field" for="oknDir">Stripe direction
+              <select id="oknDir"><option value="1">Moving right</option><option value="-1">Moving left</option></select>
+            </label>
+          </div>
+          <div class="stage sunken" id="stage"><canvas id="stim"></canvas><div class="hud" id="hud">Ready</div></div>
+          <div class="row">
+            <button class="btn default" id="stimStart" type="button">Start task</button>
+            <button class="btn" id="stimStop" type="button">Stop</button>
+            <button class="btn" id="stimFull" type="button">Full screen</button>
+          </div>
+          <p class="status" id="stimStatus"></p>
+        </section>
+      </div>
+
+      <!-- GUIDE -->
+      <div id="panel-guide" class="panel" role="tabpanel" aria-labelledby="tab-guide" hidden>
+        <section class="group" aria-labelledby="h-guide">
+          <h2 id="h-guide">Recording a clip that tracks well</h2>
+          <ol>
+            <li>Light the face evenly from the front. A window or lamp behind the patient hides the iris edge.</li>
+            <li>Put the phone on a stand 15 to 25 cm from the face, just below the line of sight, with both eyes filling most of the frame.</li>
+            <li>For gaze, saccade, pursuit and optokinetic tasks, run the Stimulus tab on a second device 50 to 70 cm away.</li>
+            <li>Put a small dark dot sticker on the bridge of the nose and mark it as the fixed point, so head movement cancels out.</li>
+            <li>Use slow motion (120 or 240 fps) when saccade speed matters, and set Capture speed to match. Normal video is enough for nystagmus and fixation.</li>
+            <li>Record 10 to 30 seconds per task with the head resting on a hand or chin rest.</li>
+          </ol>
+        </section>
+        <section class="group" aria-labelledby="h-mean">
+          <h2 id="h-mean">What the measures mean</h2>
+          <dl>
+            <dt>Slow phase velocity</dt>
+            <dd>Speed of the drift between beats, in degrees per second. The 2°/s cutoff for calling nystagmus follows the threshold used to validate the Johns Hopkins EyePhone app against video goggles.</dd>
+            <dt>Beat frequency</dt>
+            <dd>Fast phases per second in the dominant direction. The fast phase direction names the nystagmus.</dd>
+            <dt>Square wave jerks</dt>
+            <dd>Small paired saccades away from and back to the target during fixation. Rates rise in some cerebellar and basal ganglia disorders, so read them only from fixation recordings.</dd>
+            <dt>Frames tracked</dt>
+            <dd>Share of frames where the iris was found. Blinks and glare lower it.</dd>
+          </dl>
+        </section>
+      </div>
+    </div>
+
+    <footer>Video is processed on this device and never leaves it. Degrees are estimates from iris size, not a calibrated measurement.</footer>
+</div>
+
+<script>
+/*CORE*/
+</script>
+<script>
+/*APP*/
+</script>
