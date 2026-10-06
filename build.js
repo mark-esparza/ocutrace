@@ -1,8 +1,9 @@
 // Builds the standalone index.html from src/. Usage: node build.js
 const fs = require('fs');
 const core = fs.readFileSync('src/core.js', 'utf8').replace("if (typeof module !== 'undefined') module.exports = OT;\n", '');
+const tasks = fs.readFileSync('src/tasks.js', 'utf8').replace("if (typeof module !== 'undefined') module.exports = require('./core.js');\n", '');
 const app = fs.readFileSync('src/app.js', 'utf8');
-let page = fs.readFileSync('src/page.html', 'utf8').replace('/*CORE*/', () => core).replace('/*APP*/', () => app);
+let page = fs.readFileSync('src/page.html', 'utf8').replace('/*CORE*/', () => core).replace('/*TASKS*/', () => tasks).replace('/*APP*/', () => app);
 const title = page.match(/<title>[\s\S]*?<\/title>/)[0];
 const style = page.match(/<style>[\s\S]*?<\/style>/)[0];
 page = page.replace(title, '').replace(style, '').trim();
