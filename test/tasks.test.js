@@ -58,6 +58,61 @@ function run(task, samples, plan, t0, opts) {
   check('vertical peak velocity within 10% at 240 fps', within(val(out, 'peakVel'), 0.9 * truePk, 1.1 * truePk), `${val(out, 'peakVel').toFixed(0)} vs ${truePk.toFixed(0)}`);
 }
 
+// ---------- curve-fit onset (Lai et al. 2020) ----------
+{
+  // 60 saccades at 60 fps whose onsets fall at random points between frames. Truth is the time the
+  // minimum-jerk profile has covered 3% of its amplitude, the onset definition the fit uses.
+  const s3 = (() => { let lo = 0, hi = 0.5; for (let k = 0; k < 60; k++) { const m = (lo + hi) / 2; (10 * m ** 3 - 15 * m ** 4 + 6 * m ** 5 < 0.03) ? lo = m : hi = m; } return lo; })();
+  const biasFit = {}, biasOld = {};
+  for (const [fs, noise, tolSd, tolBias, minKept] of [[60, 0.03, 3, 2, 60], [60, 0.1, 5, 3, 60], [30, 0.03, 7, 4, 57]]) {
+    const N = Math.ceil(62 * fs), x = new Array(N).fill(0), truth = [];
+    let pos = 0;
+    for (let k = 0; k < 60; k++) {
+      const t = 1 + k + rand() * 0.5, amp = (pos === 0 ? 1 : -1) * (6 + 6 * rand());
+      addSaccade(x, fs, t, amp); pos = pos === 0 ? amp : 0;
+      truth.push(t + s3 * (0.0022 * Math.abs(amp) + 0.021));
+    }
+    const res = OT.analyze(toSamples(fs, x, null, noise));
+    const errFit = [], errOld = [];
+    for (const tr of truth) {
+      const e = res.events.find(ev => Math.abs(ev.t - tr) < 0.1); if (!e) continue;
+      const f = OT.fitEvent(res, e, 'h'); if (f && f.ok) errFit.push((f.onset - tr) * 1000);
+      errOld.push((OT.onsetTime(res, e) - tr) * 1000);
+    }
+    const mean = a => a.reduce((p, q) => p + q, 0) / a.length, sd = a => Math.sqrt(mean(a.map(v => (v - mean(a)) ** 2)));
+    // At 30 fps a short saccade can fall between two frames, leaving the curve undetermined; those are rejected.
+    check(`fit onset ${fs} fps, noise ${noise}°: at least ${minKept} of 60 trials kept`, errFit.length >= minKept, errFit.length);
+    check(`fit onset ${fs} fps, noise ${noise}°: SD under ${tolSd} ms`, sd(errFit) < tolSd, `${sd(errFit).toFixed(2)} ms (old method ${sd(errOld).toFixed(2)} ms)`);
+    check(`fit onset ${fs} fps, noise ${noise}°: bias under ${tolBias} ms`, Math.abs(mean(errFit)) < tolBias, `${mean(errFit).toFixed(2)} ms (old method ${mean(errOld).toFixed(2)} ms)`);
+    biasFit[fs + '/' + noise] = mean(errFit); biasOld[fs + '/' + noise] = mean(errOld);
+  }
+  // The point of the fit: its bias does not move with frame rate, unlike interpolated speed onsets.
+  const shiftFit = Math.abs(biasFit['60/0.03'] - biasFit['30/0.03']), shiftOld = Math.abs(biasOld['60/0.03'] - biasOld['30/0.03']);
+  check('fit onset: bias shifts under 3 ms between 30 and 60 fps', shiftFit < 3, `${shiftFit.toFixed(2)} ms (old method ${shiftOld.toFixed(2)} ms)`);
+  // Quality score: a saccade buried in tracking noise is rejected; a clean one is kept.
+  const fs = 60, N = 4 * fs, clean = new Array(N).fill(0); addSaccade(clean, fs, 1.5, 10);
+  const bad = clean.map((v, i) => Math.abs(i / fs - 1.5) < 0.12 ? v + 2.5 * gauss() : v);
+  const fitOf = arr => { const r = OT.analyze(toSamples(fs, arr)); const e = r.events.reduce((p, c) => Math.abs(c.dx) > Math.abs(p.dx) ? c : p); return OT.fitEvent(r, e, 'h'); };
+  const fc = fitOf(clean), fb = fitOf(bad);
+  check('quality: clean saccade kept (R² > 0.98)', fc.ok && fc.r2 > 0.98, fc.r2.toFixed(3));
+  check('quality: noisy saccade rejected', !fb || !fb.ok, fb ? fb.r2.toFixed(3) : 'no fit');
+}
+
+// ---------- per-person calibration ----------
+{
+  // A person whose eyes read 0.8x horizontally and 1.15x vertically on the population scale.
+  const fs = 60, T0 = 0.8, plan = OT.makePlan('gaze', 15), N = Math.ceil((T0 + plan.duration + 0.5) * fs);
+  const x = new Array(N).fill(0), y = new Array(N).fill(0); let target = { x: 0, y: 0 };
+  plan.steps.forEach(st => { addSaccade(x, fs, T0 + st.t + 0.2, 0.8 * (st.goal.x - target.x)); addSaccade(y, fs, T0 + st.t + 0.2, 1.15 * (st.goal.y - target.y)); target = st.goal; });
+  const smp = toSamples(fs, x, y);
+  const out = run('gaze', smp, plan, T0);
+  check('calibration: horizontal gain 0.80', within(out.calibration.h, 0.77, 0.83), out.calibration.h.toFixed(3));
+  check('calibration: vertical gain 1.15', within(out.calibration.v, 1.11, 1.19), out.calibration.v.toFixed(3));
+  const again = run('gaze', OT.applyCalibration(smp, out.calibration), plan, T0);
+  check('calibration: applied, position gains return to 1', within(again.calibration.h, 0.98, 1.02) && within(again.calibration.v, 0.98, 1.02), `${again.calibration.h.toFixed(3)}, ${again.calibration.v.toFixed(3)}`);
+  check('calibration: identity leaves samples untouched', OT.applyCalibration(smp, { h: 1, v: 1 }) === smp, 'same array');
+}
+
 // ---------- antisaccades ----------
 {
   const fs = 60, T0 = 2.0, plan = OT.makePlan('anti', 10), N = Math.ceil((T0 + plan.duration + 1) * fs);

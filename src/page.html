@@ -56,7 +56,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 
 .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 20px; }
 .field { display: grid; gap: 4px; font-size: 14px; }
-select, input[type="number"] { font: 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--field); border-radius: 4px; padding: 8px; min-height: 42px; }
+select, input[type="number"], input[type="text"] { font: 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--field); border-radius: 4px; padding: 8px; min-height: 42px; }
 .check { display: flex; gap: 8px; align-items: center; font-size: 14px; min-height: 42px; }
 .check input { width: 17px; height: 17px; accent-color: var(--red); }
 input[type=range] { width: 100%; accent-color: var(--red); }
@@ -116,6 +116,12 @@ dd { margin: 2px 0 0; color: var(--text-dim); max-width: 64ch; }
 
 footer { border-top: 1px solid var(--rule); padding-top: 14px; font-size: 13px; color: var(--text-dim); }
 footer a { color: inherit; }
+.checks { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+.checks li { display: grid; grid-template-columns: 22px 1fr; gap: 2px 8px; align-items: start; }
+.checks li::before { content: "✓"; font-weight: bold; color: #1d7a3a; grid-row: span 2; }
+.checks li.warn::before { content: "!"; color: #8a5a00; }
+.checks li.fail::before { content: "✕"; color: var(--red); }
+.checks .adv { grid-column: 2; color: var(--text-dim); }
 </style>
 
 <div class="page">
@@ -178,6 +184,15 @@ footer a { color: inherit; }
             <div class="field" id="beepField"><span aria-hidden="true">&nbsp;</span><button class="btn" id="beepBtn" type="button">Find the start beep</button></div>
           </div>
           <p class="status" id="syncStatus" role="status"></p>
+          <div class="settings">
+            <label class="field" for="calH">Degree scale correction, horizontal (×)
+              <input type="number" id="calH" min="0.5" max="1.5" step="0.01" value="1" inputmode="decimal">
+            </label>
+            <label class="field" for="calV">Degree scale correction, vertical (×)
+              <input type="number" id="calV" min="0.5" max="1.5" step="0.01" value="1" inputmode="decimal">
+            </label>
+          </div>
+          <p class="status" id="calStatus" role="status">No calibration: degrees use the population average iris and eye size. Record the gaze holding task to calibrate this person.</p>
           <p class="status" id="srcStatus" role="status"></p>
           <video id="vid" muted playsinline preload="auto" style="position:absolute;width:2px;height:2px;opacity:0.01;pointer-events:none;left:0;top:0"></video>
         </section>
@@ -202,6 +217,7 @@ footer a { color: inherit; }
             <button class="btn" id="clearEye2Btn" type="button">Clear other eye</button>
           </div>
           <p class="hint">Marking both eyes adds the adducting to abducting velocity ratio used for internuclear ophthalmoplegia.</p>
+          <ul class="checks" id="preCheck" aria-label="Recording check before tracking" hidden></ul>
           <div class="progress" id="prog" hidden role="progressbar" aria-label="Tracking progress" aria-valuemin="0" aria-valuemax="100"><div class="bar"></div></div>
         </section>
 
@@ -232,10 +248,23 @@ footer a { color: inherit; }
             </table>
           </div>
           <p class="warn" id="fpsNote" hidden></p>
+          <details id="checkDetails" open>
+            <summary id="checkSummary">Recording check</summary>
+            <ul class="checks" id="checkList"></ul>
+          </details>
+          <div class="row" id="calRow" hidden>
+            <button class="btn" id="useCalBtn" type="button">Use these gains for this person's other clips</button>
+          </div>
           <div class="row">
             <button class="btn" id="saveCsv" type="button" hidden>Save trace as CSV</button>
             <button class="btn" id="copyCsv" type="button">Copy trace as CSV</button>
             <button class="btn" id="saveSummary" type="button">Save measures as CSV</button>
+          </div>
+          <div class="settings">
+            <label class="field" for="bidsSub">Participant label for the BIDS export
+              <input type="text" id="bidsSub" value="01" maxlength="24" autocomplete="off" spellcheck="false">
+            </label>
+            <div class="field"><span aria-hidden="true">&nbsp;</span><button class="btn" id="saveBids" type="button">Save BIDS dataset (.zip)</button></div>
           </div>
           <p class="status" id="csvStatus" role="status"></p>
           <textarea id="csvBox" hidden readonly aria-label="Trace CSV"></textarea>
@@ -257,8 +286,11 @@ footer a { color: inherit; }
               <li>A fast event is any stretch where speed exceeds the larger of 20°/s and the median speed plus six robust standard deviations.</li>
               <li>Nystagmus is called when at least three fast phases go one way (70% agreement) and the median slow phase velocity between them is at least 2°/s the other way.</li>
               <li>Square wave jerks are opposite horizontal saccade pairs of 0.5° to 5°, similar in size, 150 to 500 ms apart.</li>
-              <li>Timed tasks are lined up with the stimulus by its three start beeps, found in the clip's sound. Saccade latency is the time from the target step to saccade onset (speed rising past 20% of its peak), and includes the stimulus screen's display delay. Responses under 80 ms count as anticipatory.</li>
-              <li>Saccade gain is the primary saccade divided by the target step. An antisaccade error is a first saccade toward the cue.</li>
+              <li>Timed tasks are lined up with the stimulus by its three start beeps, found in the clip's sound. Each saccade is fitted with a smooth S-shaped (tanh) curve, after Lai et al. (IEEE JBHI 2020). Latency runs from the target step to where the curve has covered 3% of its jump, which places onset between frames, and includes the stimulus screen's display delay. Responses under 80 ms count as anticipatory.</li>
+              <li>The fit is each trial's quality score: trials with R² under 0.9, or a fit error over 10% of the saccade, are left out and listed as rejected. Saccade gain is the fitted amplitude divided by the target step. An antisaccade error is a first saccade toward the cue.</li>
+              <li>The recording check grades lighting (grey level of the eye region), reflections and glasses glare (saturated pixels), iris size, iris contrast, frame timing and the share of frames tracked.</li>
+              <li>The gaze holding task measures how far the eye turns for each target. Applied as a calibration, those horizontal and vertical gains rescale this person's other clips to their own eye.</li>
+              <li>The BIDS export follows Eye-Tracking-BIDS (BIDS 1.11): one physio file per eye with its sidecar, an events file with saccades, tracking loss and stimulus steps, and the measures as a derivative.</li>
               <li>Pursuit gain is the amplitude of eye velocity at the target frequency, fitted with catch-up saccades removed, divided by target velocity. Catch-up saccades are found on eye velocity minus that fit.</li>
               <li>Optokinetic gain is slow phase velocity divided by stripe speed; asymmetry is (right − left) ÷ (right + left).</li>
               <li>Positional nystagmus is followed in 2 s windows every 0.5 s; onset, duration, peak slow phase velocity and time to half the peak are reported for each position.</li>
@@ -354,6 +386,9 @@ footer a { color: inherit; }
 </script>
 <script>
 /*TASKS*/
+</script>
+<script>
+/*EXPORT*/
 </script>
 <script>
 /*APP*/

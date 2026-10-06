@@ -63,7 +63,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 
 .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 20px; }
 .field { display: grid; gap: 4px; font-size: 14px; }
-select, input[type="number"] { font: 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--field); border-radius: 4px; padding: 8px; min-height: 42px; }
+select, input[type="number"], input[type="text"] { font: 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--field); border-radius: 4px; padding: 8px; min-height: 42px; }
 .check { display: flex; gap: 8px; align-items: center; font-size: 14px; min-height: 42px; }
 .check input { width: 17px; height: 17px; accent-color: var(--red); }
 input[type=range] { width: 100%; accent-color: var(--red); }
@@ -123,6 +123,12 @@ dd { margin: 2px 0 0; color: var(--text-dim); max-width: 64ch; }
 
 footer { border-top: 1px solid var(--rule); padding-top: 14px; font-size: 13px; color: var(--text-dim); }
 footer a { color: inherit; }
+.checks { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+.checks li { display: grid; grid-template-columns: 22px 1fr; gap: 2px 8px; align-items: start; }
+.checks li::before { content: "✓"; font-weight: bold; color: #1d7a3a; grid-row: span 2; }
+.checks li.warn::before { content: "!"; color: #8a5a00; }
+.checks li.fail::before { content: "✕"; color: var(--red); }
+.checks .adv { grid-column: 2; color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -186,6 +192,15 @@ footer a { color: inherit; }
             <div class="field" id="beepField"><span aria-hidden="true">&nbsp;</span><button class="btn" id="beepBtn" type="button">Find the start beep</button></div>
           </div>
           <p class="status" id="syncStatus" role="status"></p>
+          <div class="settings">
+            <label class="field" for="calH">Degree scale correction, horizontal (×)
+              <input type="number" id="calH" min="0.5" max="1.5" step="0.01" value="1" inputmode="decimal">
+            </label>
+            <label class="field" for="calV">Degree scale correction, vertical (×)
+              <input type="number" id="calV" min="0.5" max="1.5" step="0.01" value="1" inputmode="decimal">
+            </label>
+          </div>
+          <p class="status" id="calStatus" role="status">No calibration: degrees use the population average iris and eye size. Record the gaze holding task to calibrate this person.</p>
           <p class="status" id="srcStatus" role="status"></p>
           <video id="vid" muted playsinline preload="auto" style="position:absolute;width:2px;height:2px;opacity:0.01;pointer-events:none;left:0;top:0"></video>
         </section>
@@ -210,6 +225,7 @@ footer a { color: inherit; }
             <button class="btn" id="clearEye2Btn" type="button">Clear other eye</button>
           </div>
           <p class="hint">Marking both eyes adds the adducting to abducting velocity ratio used for internuclear ophthalmoplegia.</p>
+          <ul class="checks" id="preCheck" aria-label="Recording check before tracking" hidden></ul>
           <div class="progress" id="prog" hidden role="progressbar" aria-label="Tracking progress" aria-valuemin="0" aria-valuemax="100"><div class="bar"></div></div>
         </section>
 
@@ -240,10 +256,23 @@ footer a { color: inherit; }
             </table>
           </div>
           <p class="warn" id="fpsNote" hidden></p>
+          <details id="checkDetails" open>
+            <summary id="checkSummary">Recording check</summary>
+            <ul class="checks" id="checkList"></ul>
+          </details>
+          <div class="row" id="calRow" hidden>
+            <button class="btn" id="useCalBtn" type="button">Use these gains for this person's other clips</button>
+          </div>
           <div class="row">
             <button class="btn" id="saveCsv" type="button" hidden>Save trace as CSV</button>
             <button class="btn" id="copyCsv" type="button">Copy trace as CSV</button>
             <button class="btn" id="saveSummary" type="button">Save measures as CSV</button>
+          </div>
+          <div class="settings">
+            <label class="field" for="bidsSub">Participant label for the BIDS export
+              <input type="text" id="bidsSub" value="01" maxlength="24" autocomplete="off" spellcheck="false">
+            </label>
+            <div class="field"><span aria-hidden="true">&nbsp;</span><button class="btn" id="saveBids" type="button">Save BIDS dataset (.zip)</button></div>
           </div>
           <p class="status" id="csvStatus" role="status"></p>
           <textarea id="csvBox" hidden readonly aria-label="Trace CSV"></textarea>
@@ -265,8 +294,11 @@ footer a { color: inherit; }
               <li>A fast event is any stretch where speed exceeds the larger of 20°/s and the median speed plus six robust standard deviations.</li>
               <li>Nystagmus is called when at least three fast phases go one way (70% agreement) and the median slow phase velocity between them is at least 2°/s the other way.</li>
               <li>Square wave jerks are opposite horizontal saccade pairs of 0.5° to 5°, similar in size, 150 to 500 ms apart.</li>
-              <li>Timed tasks are lined up with the stimulus by its three start beeps, found in the clip's sound. Saccade latency is the time from the target step to saccade onset (speed rising past 20% of its peak), and includes the stimulus screen's display delay. Responses under 80 ms count as anticipatory.</li>
-              <li>Saccade gain is the primary saccade divided by the target step. An antisaccade error is a first saccade toward the cue.</li>
+              <li>Timed tasks are lined up with the stimulus by its three start beeps, found in the clip's sound. Each saccade is fitted with a smooth S-shaped (tanh) curve, after Lai et al. (IEEE JBHI 2020). Latency runs from the target step to where the curve has covered 3% of its jump, which places onset between frames, and includes the stimulus screen's display delay. Responses under 80 ms count as anticipatory.</li>
+              <li>The fit is each trial's quality score: trials with R² under 0.9, or a fit error over 10% of the saccade, are left out and listed as rejected. Saccade gain is the fitted amplitude divided by the target step. An antisaccade error is a first saccade toward the cue.</li>
+              <li>The recording check grades lighting (grey level of the eye region), reflections and glasses glare (saturated pixels), iris size, iris contrast, frame timing and the share of frames tracked.</li>
+              <li>The gaze holding task measures how far the eye turns for each target. Applied as a calibration, those horizontal and vertical gains rescale this person's other clips to their own eye.</li>
+              <li>The BIDS export follows Eye-Tracking-BIDS (BIDS 1.11): one physio file per eye with its sidecar, an events file with saccades, tracking loss and stimulus steps, and the measures as a derivative.</li>
               <li>Pursuit gain is the amplitude of eye velocity at the target frequency, fitted with catch-up saccades removed, divided by target velocity. Catch-up saccades are found on eye velocity minus that fit.</li>
               <li>Optokinetic gain is slow phase velocity divided by stripe speed; asymmetry is (right − left) ÷ (right + left).</li>
               <li>Positional nystagmus is followed in 2 s windows every 0.5 s; onset, duration, peak slow phase velocity and time to half the peak are reported for each position.</li>
@@ -677,7 +709,7 @@ const OT = (() => {
 
 (function (OT) {
   // Bump when any measure below changes, so a study can lock one version.
-  const ALGO_VERSION = '0.2.0';
+  const ALGO_VERSION = '0.3.0';
 
   // ---------- plans ----------
   // Positions are degrees of visual angle, x toward the subject's right, y up. Plan time 0 is the
@@ -875,6 +907,111 @@ const OT = (() => {
     return res.t[k - 1] + f * (res.t[k] - res.t[k - 1]);
   }
 
+  // Saccade onset by curve fit (Lai et al., IEEE JBHI 2020): fit eye position across the saccade with
+  // a + b·tanh((t − tc)/τ), take onset where the curve has covered 3% of its jump, and use the fit's
+  // R² as the trial's quality score. At 60 fps a saccade spans two or three frames, so the fitted
+  // curve places onset between frames, where interpolating speed samples cannot.
+  const FIT_ONSET = Math.atanh(0.94);  // (tanh + 1)/2 = 0.03
+  const FIT_MIN_R2 = 0.9;       // and residual error at most 10% of the saccade's size
+  const FIT_MAX_NRMSE = 0.1;
+  function fitSaccade(t, y, ta, tb) {
+    const ts = [], ys = [];
+    for (let i = 0; i < t.length; i++) if (t[i] >= ta && t[i] <= tb && Number.isFinite(y[i])) { ts.push(t[i]); ys.push(y[i]); }
+    const n = ts.length;
+    if (n < 6) return null;
+    const my = ys.reduce((p, q) => p + q, 0) / n;
+    let sst = 0; for (const v of ys) sst += (v - my) ** 2;
+    if (!(sst > 0)) return null;
+    // For fixed tc and τ the model is linear in a and b, so solve those exactly.
+    const sse = (tc, tau) => {
+      let su = 0, suu = 0, sy = 0, suy = 0;
+      for (let i = 0; i < n; i++) { const u = Math.tanh((ts[i] - tc) / tau); su += u; suu += u * u; sy += ys[i]; suy += u * ys[i]; }
+      const det = n * suu - su * su; if (Math.abs(det) < 1e-12) return { e: Infinity };
+      const b = (n * suy - su * sy) / det, a = (sy - b * su) / n;
+      let e = 0; for (let i = 0; i < n; i++) e += (ys[i] - a - b * Math.tanh((ts[i] - tc) / tau)) ** 2;
+      return { e, a, b };
+    };
+    const tauMin = 0.003, tauMax = 0.06;
+    let best = { e: Infinity };
+    const dt = (ts[n - 1] - ts[0]) / (n - 1);
+    for (let tau = tauMin; tau <= tauMax; tau *= 1.3) {
+      for (let tc = ts[0]; tc <= ts[n - 1]; tc += dt / 4) {
+        const f = sse(tc, tau); if (f.e < best.e) best = { ...f, tc, tau };
+      }
+    }
+    if (!Number.isFinite(best.e)) return null;
+    // Refine with shrinking coordinate steps.
+    let stc = dt / 4, stau = best.tau * 0.15;
+    for (let it = 0; it < 60 && (stc > 1e-5 || stau > 1e-5); it++) {
+      let moved = false;
+      for (const [dtc, dtau] of [[stc, 0], [-stc, 0], [0, stau], [0, -stau]]) {
+        const tc = best.tc + dtc, tau = Math.min(tauMax, Math.max(tauMin, best.tau + dtau));
+        const f = sse(tc, tau); if (f.e < best.e - 1e-15) { best = { ...f, tc, tau }; moved = true; }
+      }
+      if (!moved) { stc /= 2; stau /= 2; }
+    }
+    const r2 = 1 - best.e / sst;
+    return { onset: best.tc - FIT_ONSET * best.tau, amp: 2 * best.b, tc: best.tc, tau: best.tau, r2, rmse: Math.sqrt(best.e / n), n,
+      ok: r2 >= FIT_MIN_R2 && Math.sqrt(best.e / n) <= FIT_MAX_NRMSE * Math.abs(2 * best.b) && best.tau > tauMin && best.tau < tauMax };
+  }
+  // Fit window for one detected saccade: up to 120 ms either side, stopping short of neighbouring events.
+  function fitEvent(res, e, axis) {
+    const k = res.events.indexOf(e);
+    const prev = res.events[k - 1], next = res.events[k + 1];
+    const ta = Math.max(e.t - 0.12, prev ? prev.tEnd : -Infinity);
+    const tb = Math.min(e.tEnd + 0.12, next ? next.t : Infinity);
+    return fitSaccade(res.t, axis === 'v' ? res.y : res.x, ta, tb);
+  }
+
+  // Recording check (lighting, glasses glare, iris size, frame timing, tracking), so a poor clip is
+  // flagged before its numbers are read. Brightness is mean grey level of the eye crop (0–255), a proxy
+  // for room light: usable traces fall off sharply in dim rooms and with glasses.
+  function recordingCheck(mm) {
+    const items = [];
+    const add = (key, label, status, value, advice) => items.push({ key, label, status, value, advice });
+    if (Number.isFinite(mm.luma)) {
+      add('light', 'Lighting', mm.luma < 50 ? 'fail' : mm.luma < 80 ? 'warn' : 'ok', `grey level ${mm.luma.toFixed(0)} of 255`,
+        mm.luma < 80 ? 'Add light in front of the face; dim rooms cut the share of usable frames sharply.' : '');
+    }
+    if (Number.isFinite(mm.glare)) {
+      add('glare', 'Reflections and glasses glare', mm.glare > 0.08 ? 'fail' : mm.glare > 0.03 ? 'warn' : 'ok', `${(100 * mm.glare).toFixed(1)}% of the eye region saturated`,
+        mm.glare > 0.03 ? 'Tilt or remove glasses, or move the light so its reflection is off the eye.' : '');
+    }
+    if (Number.isFinite(mm.radius)) {
+      add('size', 'Iris size in the picture', mm.radius < 10 ? 'fail' : mm.radius < 18 ? 'warn' : 'ok', `${mm.radius.toFixed(0)} px radius`,
+        mm.radius < 18 ? 'Move the phone closer so the iris is at least 36 px across.' : '');
+    }
+    if (Number.isFinite(mm.contrast)) {
+      add('contrast', 'Iris contrast', mm.contrast < 20 ? 'fail' : mm.contrast < 35 ? 'warn' : 'ok', `${mm.contrast.toFixed(0)} grey levels`,
+        mm.contrast < 35 ? 'The iris edge is faint; light the face from the front and avoid backlight.' : '');
+    }
+    if (Number.isFinite(mm.validPct)) {
+      add('tracked', 'Frames tracked', mm.validPct < 0.8 ? 'fail' : mm.validPct < 0.95 ? 'warn' : 'ok', `${(100 * mm.validPct).toFixed(0)}%`,
+        mm.validPct < 0.95 ? 'Blinks, glare or the eye leaving the frame lost the iris; check the trace for gaps.' : '');
+    }
+    if (mm.dts && mm.dts.length > 10) {
+      const d = mm.dts.filter(v => v > 0), med = median(d);
+      const jitter = Math.sqrt(d.reduce((p, v) => p + (v - med) ** 2, 0) / d.length) / med;
+      const dropped = d.filter(v => v > 1.5 * med).length / d.length;
+      add('timing', 'Frame timing', jitter > 0.5 || dropped > 0.1 ? 'fail' : jitter > 0.25 || dropped > 0.03 ? 'warn' : 'ok',
+        `${(1 / med).toFixed(0)} fps, ${(100 * dropped).toFixed(1)}% frames late, spread ${(100 * jitter).toFixed(0)}%`,
+        jitter > 0.25 || dropped > 0.03 ? 'Uneven frame timing blurs latency and speed; close other apps and record at a fixed frame rate.' : '');
+      if (mm.saccadic && 1 / med < 100) add('rate', 'Frame rate for saccades', 'warn', `${(1 / med).toFixed(0)} fps`, 'Peak saccade velocity reads low below about 240 fps; latency and gain are still usable.');
+    }
+    const worst = items.some(i => i.status === 'fail') ? 'fail' : items.some(i => i.status === 'warn') ? 'warn' : 'ok';
+    return { items, status: worst };
+  }
+
+  // Per-person degree scale from gaze holding: measured eccentricity ÷ target eccentricity, horizontal and vertical.
+  function applyCalibration(samples, cal) {
+    if (!cal || !(cal.h > 0) || !(cal.v > 0) || (cal.h === 1 && cal.v === 1)) return samples;
+    return samples.map(s => {
+      const o = { ...s, x: s.x / cal.h, y: s.y / cal.v };
+      if ('x2' in s) { o.x2 = s.x2 / cal.h; o.y2 = s.y2 / cal.v; }
+      return o;
+    });
+  }
+
   // ---------- per task ----------
   function fixationMeasures(samples, res, plan, t0) {
     const r = t0 == null ? res : sub(samples, t0 + plan.segments[0].t0, t0 + plan.segments[0].t1, res.threshold) || res;
@@ -905,14 +1042,14 @@ const OT = (() => {
     const centers = plan.segments.filter(s => s.kind === 'center').map(s => meanPos(res, t0 + s.t0, t0 + s.t1));
     const cx = mean(centers.map(c => c.x)), cy = mean(centers.map(c => c.y));
     const trials = [], measures = [];
-    const gains = [];
+    const gains = [], gainsH = [], gainsV = [];
     let found = 0;
     for (const s of plan.segments.filter(s => s.kind === 'ecc')) {
       const r = sub(samples, t0 + s.t0, t0 + s.t1, res.threshold);
       const p = meanPos(res, t0 + s.t0, t0 + s.t1);
       const horiz = s.x !== 0, ecc = horiz ? s.x : s.y;
       const posGain = ((horiz ? p.x - cx : p.y - cy)) / ecc;
-      gains.push(posGain);
+      gains.push(posGain); (horiz ? gainsH : gainsV).push(posGain);
       if (!r) { trials.push([s.label, '–', '–', '–', '–', 'Too few frames']); continue; }
       const a = horiz ? r.h : r.v;
       const centripetal = -Math.sign(ecc) * a.medSpv; // drift back toward center is positive
@@ -921,8 +1058,12 @@ const OT = (() => {
       trials.push([s.label, fmtN(posGain, 2), fmtN(centripetal), ny ? ny.direction : 'None', ny ? fmtN(ny.beatHz) : '–', ny ? `${fmtN(Math.abs(ny.medSpv))}°/s slow phases` : '']);
       measures.push(m(`drift_${s.label}`, `${s.label}: drift toward center`, centripetal, '°/s', ny ? `${ny.direction} nystagmus, ${fmtN(ny.beatHz)} beats/s` : 'No nystagmus pattern'));
     }
+    const calibration = { h: median(gainsH), v: median(gainsV) };
     measures.push(m('posGain', 'Eye position gain', median(gains), '', 'Median eye eccentricity ÷ target eccentricity, a per-person check of the degree scale'));
+    measures.push(m('calH', 'Calibration, horizontal', calibration.h, '', 'Right and left gaze; can be applied to this person\'s other clips'));
+    measures.push(m('calV', 'Calibration, vertical', calibration.v, '', 'Up and down gaze'));
     return {
+      calibration,
       headline: found ? `Nystagmus in ${found} of 4 gaze positions` : 'No gaze evoked nystagmus pattern',
       sub: `Targets at ±${plan.amp}° horizontal and ±${plan.ampV}° vertical.`,
       measures, trialCols: ['Position', 'Position gain', 'Drift to center (°/s)', 'Nystagmus', 'Beats/s', 'Note'], trials,
@@ -949,8 +1090,9 @@ const OT = (() => {
         ],
       };
     }
-    const trials = [], lat = [], gain = [], pv = [];
-    let errors = 0, corrected = 0, correct = 0, missed = 0, anticip = 0;
+    const trials = [], lat = [], gain = [], pv = [], q = [];
+    let errors = 0, corrected = 0, correct = 0, missed = 0, anticip = 0, rejected = 0;
+    const axis = vert ? 'v' : 'h';
     plan.steps.forEach((st, k) => {
       if (k === 0) return;
       if (anti && st.kind !== 'cue') return;
@@ -961,37 +1103,46 @@ const OT = (() => {
       const minAmp = Math.max(1, 0.2 * Math.abs(want));
       const evs = res.events.filter(e => e.t >= ts - 0.05 && e.t < Math.min(next, ts + 0.9) && Math.abs(comp(e)) >= minAmp);
       const label = anti ? (cue > 0 ? (vert ? 'Cue up' : 'Cue right') : (vert ? 'Cue down' : 'Cue left')) : `${want > 0 ? '+' : ''}${want.toFixed(0)}°`;
-      if (!evs.length) { missed++; trials.push([fmtN(st.t, 2), label, 'No response', '–', '–', '–']); return; }
-      const e = evs[0], on = onsetTime(res, e), L = on - ts;
-      if (L < 0.08) { anticip++; trials.push([fmtN(st.t, 2), label, 'Anticipatory', fmtN(L * 1000, 0), '–', fmtN(e.peakVel, 0)]); return; }
+      if (!evs.length) { missed++; trials.push([fmtN(st.t, 2), label, 'No response', '–', '–', '–', '–']); return; }
+      const e = evs[0], fit = fitEvent(res, e, axis);
+      const r2 = fit ? fmtN(fit.r2, 2) : '–';
+      if (!fit || !fit.ok) {
+        rejected++;
+        trials.push([fmtN(st.t, 2), label, 'Rejected, poor fit', '–', '–', fmtN(e.peakVel, 0), r2]);
+        return;
+      }
+      q.push(fit.r2);
+      const L = fit.onset - ts;
+      if (L < 0.08) { anticip++; trials.push([fmtN(st.t, 2), label, 'Anticipatory', fmtN(L * 1000, 0), '–', fmtN(e.peakVel, 0), r2]); return; }
       const towardCue = Math.sign(comp(e)) === Math.sign(cue);
       if (anti && towardCue) {
         errors++;
         const fix = evs.slice(1).find(f => Math.sign(comp(f)) !== Math.sign(cue));
         if (fix) corrected++;
-        trials.push([fmtN(st.t, 2), label, fix ? 'Error, corrected' : 'Error', fmtN(L * 1000, 0), '–', fmtN(e.peakVel, 0)]);
+        trials.push([fmtN(st.t, 2), label, fix ? 'Error, corrected' : 'Error', fmtN(L * 1000, 0), '–', fmtN(e.peakVel, 0), r2]);
         return;
       }
-      if (!anti && !towardCue) { missed++; trials.push([fmtN(st.t, 2), label, 'Wrong direction', fmtN(L * 1000, 0), '–', fmtN(e.peakVel, 0)]); return; }
+      if (!anti && !towardCue) { missed++; trials.push([fmtN(st.t, 2), label, 'Wrong direction', fmtN(L * 1000, 0), '–', fmtN(e.peakVel, 0), r2]); return; }
       correct++;
-      const g = comp(e) / want;
+      const g = fit.amp / want;
       lat.push(L * 1000); gain.push(g); pv.push(e.peakVel);
-      trials.push([fmtN(st.t, 2), label, 'Correct', fmtN(L * 1000, 0), fmtN(g, 2), fmtN(e.peakVel, 0)]);
+      trials.push([fmtN(st.t, 2), label, 'Correct', fmtN(L * 1000, 0), fmtN(g, 2), fmtN(e.peakVel, 0), r2]);
     });
     const measures = [
-      m('latency', anti ? 'Latency, correct antisaccades' : 'Latency', median(lat), 'ms', `Median of ${lat.length} trials`),
-      m('gain', 'Gain', median(gain), '', `Primary saccade ÷ target step, target ${plan.amp}°`),
+      m('latency', anti ? 'Latency, correct antisaccades' : 'Latency', median(lat), 'ms', `Median of ${lat.length} trials; onset where a fitted tanh curve covers 3% of the jump`),
+      m('gain', 'Gain', median(gain), '', `Fitted saccade amplitude ÷ target step, target ${plan.amp}°`),
       m('peakVel', 'Peak velocity', median(pv), '°/s', 'Read low below 240 fps'),
     ];
     if (anti) {
       const n = errors + correct;
       measures.unshift(m('errorRate', 'Direction error rate', n ? 100 * errors / n : NaN, '%', `${errors} of ${n} trials looked toward the cue; ${corrected} corrected`));
     }
-    measures.push(m('trials', 'Trials scored', correct + errors, '', `${missed} missed or wrong direction, ${anticip} anticipatory (under 80 ms)`, { digits: 0 }));
+    measures.push(m('trials', 'Trials scored', correct + errors, '', `${missed} missed or wrong direction, ${anticip} anticipatory (under 80 ms), ${rejected} rejected for a poor curve fit (R² under ${FIT_MIN_R2} or error over 10% of the saccade)`, { digits: 0 }));
+    measures.push(m('fitQuality', 'Median fit quality (R²)', median(q), '', 'Agreement of each saccade with the fitted curve; trials under the cutoff are left out'));
     return {
       headline: anti ? `Antisaccade errors ${measures[0].value.toFixed(0)}%` : `Saccade latency ${fmtN(median(lat), 0)} ms, gain ${fmtN(median(gain), 2)}`,
       sub: `${plan.name}, ${correct + errors} scored trials. Latency includes the stimulus screen's display delay.`,
-      measures, trialCols: ['Time (s)', 'Target', 'Response', 'Latency (ms)', 'Gain', 'Peak (°/s)'], trials,
+      measures, trialCols: ['Time (s)', 'Target', 'Response', 'Latency (ms)', 'Gain', 'Peak (°/s)', 'Fit R²'], trials,
     };
   }
 
@@ -1188,8 +1339,125 @@ const OT = (() => {
 
   function fmtN(v, d = 1) { return Number.isFinite(v) ? v.toFixed(d) : '–'; }
 
-  Object.assign(OT, { ALGO_VERSION, SYNC, TASKS, makePlan, findStartBeep, taskMeasures, binocularMeasures, onsetTime, nystagmusCourse });
+  Object.assign(OT, { ALGO_VERSION, SYNC, TASKS, makePlan, findStartBeep, taskMeasures, binocularMeasures, onsetTime, nystagmusCourse, fitSaccade, fitEvent, applyCalibration, recordingCheck, FIT_MIN_R2, FIT_MAX_NRMSE });
 })(typeof module !== 'undefined' ? require('./core.js') : OT);
+
+</script>
+<script>
+// OcuTrace export: Eye-Tracking-BIDS files (BIDS 1.11 physio with PhysioType "eyetrack") and a small
+// stored-only zip writer, so a recording leaves the browser as a standard dataset with no libraries.
+// Pure functions, no DOM. Shared by the page and the Node tests.
+// Copyright (c) 2026 Mark Esparza. Released under the MIT License; see LICENSE.
+
+(function (OT) {
+  const label = s => String(s).replace(/[^A-Za-z0-9]/g, '') || 'x';
+  const num = (v, d) => Number.isFinite(v) ? v.toFixed(d) : 'n/a';
+  const tsv = rows => rows.map(r => r.join('\t')).join('\n') + '\n';
+
+  // samples: tracked samples (degrees, after any calibration); res: OT.analyze(samples).
+  // opts: { sub, task, plan, t0, eyes: ['right'|'left'|'n/a', ...], source, fps, calibration, measuresCsv }
+  function bidsFiles(samples, res, opts) {
+    const sub = label(opts.sub || '01'), task = label(opts.task || 'free');
+    const base = `sub-${sub}/beh/sub-${sub}_task-${task}`;
+    const files = [];
+    const json = (path, obj) => files.push({ path, text: JSON.stringify(obj, null, 2) + '\n' });
+    json('dataset_description.json', {
+      Name: 'OcuTrace eye movement recording', BIDSVersion: '1.11.0', DatasetType: 'raw', License: 'Research use; see the recording site',
+      GeneratedBy: [{ Name: 'OcuTrace', Version: OT.ALGO_VERSION, CodeURL: 'https://github.com/mark-esparza/ocutrace' }],
+    });
+    files.push({ path: 'README', text: `Exported by OcuTrace ${OT.ALGO_VERSION} from ${opts.source || 'a video clip'}.\n` +
+      'Eye position is iris rotation relative to the head (fixed facial point when marked), in degrees, estimated from iris size.\n' +
+      'Pupil size is not measured. Timestamps are milliseconds from the start of the clip, corrected for slow motion.\n' });
+    const eyes = opts.eyes || ['n/a'];
+    const two = samples.some(s => 'ok2' in s);
+    const mx2 = two ? OT.median(samples.map(s => s.ok2 ? s.x2 : NaN)) : 0, my2 = two ? OT.median(samples.map(s => s.ok2 ? s.y2 : NaN)) : 0;
+    const recs = [{ n: 1, x: i => res.ok[i] ? res.x[i] : NaN, y: i => res.ok[i] ? res.y[i] : NaN, eye: eyes[0] }];
+    if (two) recs.push({ n: 2, x: i => samples[i].ok2 ? samples[i].x2 - mx2 : NaN, y: i => samples[i].ok2 ? samples[i].y2 - my2 : NaN, eye: eyes[1] || 'n/a' });
+    for (const rec of recs) {
+      const stem = `${base}_recording-eye${rec.n}`;
+      const rows = [];
+      for (let i = 0; i < res.n; i++) rows.push([num(res.t[i] * 1000, 3), num(rec.x(i), 4), num(rec.y(i), 4), 'n/a']);
+      files.push({ path: `${stem}_physio.tsv.gz`, text: tsv(rows), gzip: true });
+      json(`${stem}_physio.json`, {
+        PhysioType: 'eyetrack', RecordedEye: rec.eye, SamplingFrequency: +res.fps.toFixed(3), StartTime: 0,
+        Columns: ['timestamp', 'x_coordinate', 'y_coordinate', 'pupil_size'],
+        timestamp: { Description: 'Frame time from the start of the clip, corrected for slow motion capture.', Units: 'ms' },
+        x_coordinate: { Description: 'Horizontal eye rotation, positive toward the subject\'s right, median position removed.', Units: 'deg' },
+        y_coordinate: { Description: 'Vertical eye rotation, positive up, median position removed.', Units: 'deg' },
+        pupil_size: { Description: 'Pupil diameter. Not measured by OcuTrace, so every value is n/a.', Units: 'n/a' },
+        SampleCoordinateSystem: 'eye-in-head', Manufacturer: 'OcuTrace (smartphone or consumer camera video)',
+        SoftwareVersions: OT.ALGO_VERSION, TaskName: opts.plan ? opts.plan.name : 'Free recording',
+        OcuTraceCalibration: opts.calibration || { h: 1, v: 1 },
+      });
+      if (rec.n !== 1) continue;
+      const ev = [];
+      for (const e of res.events) ev.push([e.t * 1000, (e.tEnd - e.t) * 1000, 'saccade', `amplitude=${e.amp.toFixed(2)}deg peak=${e.peakVel.toFixed(0)}deg/s dx=${e.dx.toFixed(2)} dy=${e.dy.toFixed(2)}`]);
+      for (let i = 0; i < res.n; i++) {
+        if (res.ok[i]) continue;
+        let j = i; while (j + 1 < res.n && !res.ok[j + 1]) j++;
+        ev.push([res.t[i] * 1000, (res.t[Math.min(res.n - 1, j + 1)] - res.t[i]) * 1000, 'tracking_lost', 'blink or lost iris']);
+        i = j;
+      }
+      if (opts.plan && opts.t0 != null) {
+        ev.push([opts.t0 * 1000, opts.plan.duration * 1000, 'task', `${opts.plan.name}; start beep`]);
+        opts.plan.steps.forEach((st, k) => {
+          const nxt = opts.plan.steps[k + 1], dur = (nxt ? nxt.t : opts.plan.duration) - st.t;
+          const g = st.goal ? ` target=${st.goal.x},${st.goal.y}deg` : '';
+          ev.push([(opts.t0 + st.t) * 1000, dur * 1000, 'stimulus', `${st.label}${g}`]);
+        });
+      }
+      ev.sort((a, b) => a[0] - b[0]);
+      // onset is on the physio timestamp clock (ms); BIDS requires duration in seconds.
+      files.push({ path: `${stem}_physioevents.tsv.gz`, text: tsv(ev.map(r => [num(r[0], 3), num(r[1] / 1000, 4), r[2], r[3].replace(/\t/g, ' ')])), gzip: true });
+      json(`${stem}_physioevents.json`, {
+        Description: 'Saccades, tracking loss and stimulus steps found or shown during the recording.',
+        TaskName: opts.plan ? opts.plan.name : 'Free recording',
+        Columns: ['onset', 'duration', 'trial_type', 'message'], OnsetSource: 'timestamp',
+        onset: { Description: 'Event start on the physio timestamp clock.', Units: 'ms' },
+        trial_type: { Levels: { saccade: 'Fast eye movement found by OcuTrace', tracking_lost: 'Frames where the iris was not tracked', task: 'Whole task, aligned by the start beep', stimulus: 'One stimulus step and its target position' } },
+      });
+    }
+    if (opts.measuresCsv) {
+      json('derivatives/ocutrace/dataset_description.json', { Name: 'OcuTrace measures', BIDSVersion: '1.11.0', DatasetType: 'derivative', GeneratedBy: [{ Name: 'OcuTrace', Version: OT.ALGO_VERSION }] });
+      files.push({ path: `derivatives/ocutrace/sub-${sub}/beh/sub-${sub}_task-${task}_desc-measures.csv`, text: opts.measuresCsv });
+    }
+    return files;
+  }
+
+  // Minimal zip (stored entries, no compression): enough to hand a folder tree to the browser download.
+  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(b) { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+  function zip(entries, date = new Date()) {
+    const enc = new TextEncoder();
+    const dosTime = (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1);
+    const dosDate = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+    const chunks = [], central = []; let offset = 0;
+    for (const e of entries) {
+      const name = enc.encode(e.path), data = e.bytes, crc = crc32(data);
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+      h.setUint16(10, dosTime, true); h.setUint16(12, dosDate, true); h.setUint32(14, crc, true);
+      h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, name.length, true); h.setUint16(28, 0, true);
+      chunks.push(new Uint8Array(h.buffer), name, data);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true);
+      c.setUint16(12, dosTime, true); c.setUint16(14, dosDate, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true);
+      c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
+      central.push(new Uint8Array(c.buffer), name);
+      offset += 30 + name.length + data.length;
+    }
+    const cdSize = central.reduce((p, a) => p + a.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    const parts = [...chunks, ...central, new Uint8Array(end.buffer)];
+    const out = new Uint8Array(parts.reduce((p, a) => p + a.length, 0)); let o = 0;
+    for (const a of parts) { out.set(a, o); o += a.length; }
+    return out;
+  }
+
+  Object.assign(OT, { bidsFiles, zip, crc32 });
+})(typeof module !== 'undefined' ? require('./tasks.js') : OT);
 
 </script>
 <script>
@@ -1355,6 +1623,7 @@ const OT = (() => {
       $('#irisSize').value = 100;
       state.marking = 'ref';
       $('#markStatus').textContent = 'Iris marked. Adjust the outline if it does not sit on the iris edge, then tap a fixed point or track.';
+      preCheck();
     } else if (state.marking === 'iris2') {
       state.iris2 = irisAt(x, y);
       state.marking = null;
@@ -1366,7 +1635,30 @@ const OT = (() => {
     }
     renderFrame();
   });
-  $('#irisSize').addEventListener('input', renderFrame);
+  $('#irisSize').addEventListener('input', () => { renderFrame(); preCheck(); });
+  // Recording check on the marked frame, before any tracking.
+  function frameCheck() {
+    if (!state.src || !state.iris) return null;
+    const r = irisRadius();
+    const c = cropGray(state.src.drawable, state.src.vw, state.src.vh, state.iris.x, state.iris.y, 6 * r, N);
+    const loc = OT.locateIris(c.g, N, (state.iris.x - c.sx) * c.s - 0.5, (state.iris.y - c.sy) * c.s - 0.5, r * c.s, null, 2, 2);
+    return { ...eyeStats(c.g, N), radius: r, contrast: loc.ring - loc.dark };
+  }
+  function renderChecks(ul, check) {
+    ul.innerHTML = '';
+    for (const it of check.items) {
+      const li = document.createElement('li'); li.className = it.status;
+      const a = document.createElement('span'); a.textContent = `${it.label}: ${it.value}`; li.appendChild(a);
+      if (it.advice) { const b = document.createElement('span'); b.className = 'adv'; b.textContent = it.advice; li.appendChild(b); }
+      ul.appendChild(li);
+    }
+  }
+  function preCheck() {
+    const m = frameCheck(), ul = $('#preCheck');
+    if (!m) { ul.hidden = true; return; }
+    state.frameCheck = m;
+    renderChecks(ul, OT.recordingCheck(m)); ul.hidden = false;
+  }
   $('#markIrisBtn').addEventListener('click', () => { state.marking = 'iris'; $('#markStatus').textContent = 'Tap the center of one iris.'; renderFrame(); });
   $('#markRefBtn').addEventListener('click', () => { state.marking = 'ref'; $('#markStatus').textContent = 'Tap a fixed point such as a sticker on the nose bridge.'; renderFrame(); });
   $('#clearRefBtn').addEventListener('click', () => { state.ref = null; renderFrame(); });
@@ -1374,6 +1666,16 @@ const OT = (() => {
   $('#clearEye2Btn').addEventListener('click', () => { state.iris2 = null; renderFrame(); });
 
   // ---------- tracker ----------
+  // Light and glare in the tracking crop: mean grey level, and the share of saturated pixels near the iris.
+  function eyeStats(g, n) {
+    let sum = 0, sat = 0, cnt = 0;
+    const a = Math.floor(n / 4), b = Math.ceil(3 * n / 4);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const v = g[y * n + x]; sum += v;
+      if (y >= a && y < b && x >= a && x < b) { cnt++; if (v >= 245) sat++; }
+    }
+    return { luma: sum / (n * n), glare: cnt ? sat / cnt : 0 };
+  }
   function makeIrisTracker(src, iris, r) {
     let cx = iris.x, cy = iris.y, refScore = null;
     return drawable => {
@@ -1384,7 +1686,7 @@ const OT = (() => {
       const conf = refScore ? loc.score / refScore : 0;
       const ok = conf >= 0.45 && Math.hypot(nx - cx, ny - cy) <= 1.5 * r;
       if (ok) { cx = nx; cy = ny; }
-      return { ok, x: nx, y: ny };
+      return { ok, x: nx, y: ny, ...eyeStats(c.g, N) };
     };
   }
   function makeRefTracker(src, ref, r) {
@@ -1407,7 +1709,7 @@ const OT = (() => {
     let o1 = null, o2 = null;
     return function step(drawable) {
       const a = e1(drawable), b = e2 ? e2(drawable) : null, f = rt ? rt(drawable) : { ok: true, x: 0, y: 0 };
-      const out = { ok: a.ok && f.ok };
+      const out = { ok: a.ok && f.ok, luma: a.luma, glare: a.glare };
       if (out.ok) { const ex = a.x - f.x, ey = a.y - f.y; if (!o1) o1 = { x: ex, y: ey }; out.dx = ex - o1.x; out.dy = ey - o1.y; }
       if (b) {
         out.ok2 = b.ok && f.ok;
@@ -1419,6 +1721,7 @@ const OT = (() => {
   function toDeg(trk, r, r2, mirrored) {
     const sx = mirrored ? 1 : -1;
     const out = trk.ok ? { x: OT.pxToDeg(sx * trk.dx, r), y: OT.pxToDeg(-trk.dy, r), ok: true } : { x: NaN, y: NaN, ok: false };
+    out.luma = trk.luma; out.glare = trk.glare;
     if ('ok2' in trk) Object.assign(out, trk.ok2 ? { x2: OT.pxToDeg(sx * trk.dx2, r2), y2: OT.pxToDeg(-trk.dy2, r2), ok2: true } : { x2: NaN, y2: NaN, ok2: false });
     return out;
   }
@@ -1634,6 +1937,37 @@ const OT = (() => {
       status.textContent = 'The sound track could not be read. Enter the time the third beep sounds.'; status.classList.add('err');
     }
   }
+  // Per-person degree scale, from this person's gaze holding clip. Kept in this browser for convenience
+  // and written into every saved file, so a study can see which scale each recording used.
+  function calibration() {
+    const clamp = v => Number.isFinite(v) ? Math.min(1.5, Math.max(0.5, v)) : 1;
+    return { h: clamp(parseFloat($('#calH').value)), v: clamp(parseFloat($('#calV').value)) };
+  }
+  function describeCalibration(source) {
+    const c = calibration(), on = c.h !== 1 || c.v !== 1;
+    $('#calStatus').textContent = on
+      ? `Calibration in use: horizontal × ${c.h.toFixed(2)}, vertical × ${c.v.toFixed(2)}${source ? `, ${source}` : ''}. Set both to 1 to use the population scale.`
+      : 'No calibration: degrees use the population average iris and eye size. Record the gaze holding task to calibrate this person.';
+  }
+  function saveCalibration(source) {
+    const c = calibration();
+    try { localStorage.setItem('ocutrace-calibration', JSON.stringify({ ...c, source, date: new Date().toISOString().slice(0, 10) })); } catch (e) {}
+    describeCalibration(source);
+  }
+  ['#calH', '#calV'].forEach(sel => $(sel).addEventListener('change', () => { saveCalibration('entered by hand'); refreshResult(); }));
+  $('#useCalBtn').addEventListener('click', () => {
+    const g = state.task && state.task.out && state.task.out.calibration; if (!g) return;
+    const c = calibration();
+    // The clip was analyzed with the current correction applied, so the new correction compounds it.
+    $('#calH').value = (c.h * g.h).toFixed(3); $('#calV').value = (c.v * g.v).toFixed(3);
+    saveCalibration(`from gaze holding in ${state.resultLabel}`);
+    refreshResult();
+  });
+  try {
+    const saved = JSON.parse(localStorage.getItem('ocutrace-calibration') || 'null');
+    if (saved && saved.h > 0 && saved.v > 0) { $('#calH').value = saved.h; $('#calV').value = saved.v; describeCalibration(`${saved.source || 'saved'}${saved.date ? ', ' + saved.date : ''}`); }
+  } catch (e) {}
+
   function taskContext() {
     const task = $('#anTask').value, def = OT.TASKS[task];
     const plan = OT.makePlan(task, +$('#anAmp').value || def.amp, def.ampV ? +$('#anAmpV').value || def.ampV : 0);
@@ -1650,6 +1984,8 @@ const OT = (() => {
   const FAST_DIR = { 'Right-beating': 'rightward', 'Left-beating': 'leftward', 'Upbeat': 'upward', 'Downbeat': 'downward' };
   function showResult(samples, label, synthetic) {
     state.samples = samples; state.resultLabel = label; state.resultSynthetic = synthetic;
+    state.cal = synthetic ? { h: 1, v: 1 } : calibration();
+    samples = state.calSamples = OT.applyCalibration(samples, state.cal);
     const res = OT.analyze(samples);
     state.result = res;
     const tc = taskContext();
@@ -1705,6 +2041,18 @@ const OT = (() => {
       note.lastChild.textContent = `At ${fmt(res.fps, 0)} fps, peak speeds read low and brief saccades can be missed. Record in 240 fps slow motion when saccade speed matters.`;
     }
     else note.hidden = true;
+
+    // Recording check over the whole clip.
+    const fm = state.frameCheck || {};
+    const lumas = samples.map(s => s.luma).filter(Number.isFinite), glares = samples.map(s => s.glare).filter(Number.isFinite);
+    const dts = []; for (let i = 1; i < samples.length; i++) dts.push(samples[i].t - samples[i - 1].t);
+    state.check = OT.recordingCheck({ luma: OT.median(lumas), glare: OT.median(glares), radius: irisRadius(), contrast: fm.contrast,
+      validPct: res.validPct, dts, saccadic: ['sacH', 'sacV', 'anti'].includes(tc.task) });
+    renderChecks($('#checkList'), state.check);
+    const nBad = state.check.items.filter(i => i.status !== 'ok').length;
+    $('#checkSummary').textContent = nBad ? `Recording check: ${nBad} item${nBad > 1 ? 's' : ''} to review` : 'Recording check: all clear';
+    $('#checkDetails').open = nBad > 0;
+    $('#calRow').hidden = !(tc.task === 'gaze' && out && out.calibration && Number.isFinite(out.calibration.h) && Number.isFinite(out.calibration.v) && !synthetic);
 
     const td = $('#trialDetails');
     if (out && out.trials && out.trials.length) {
@@ -1865,7 +2213,7 @@ const OT = (() => {
     const res = state.result; if (!res) return '';
     const evAt = new Array(res.n).fill('');
     res.events.forEach((e, k) => { for (let i = e.i0; i <= e.i1; i++) evAt[i] = String(k + 1); });
-    const smp = state.samples, two = smp.some(s => 'ok2' in s);
+    const smp = state.calSamples || state.samples, two = smp.some(s => 'ok2' in s);
     const mx2 = two ? OT.median(smp.map(s => s.ok2 ? s.x2 : NaN)) : 0, my2 = two ? OT.median(smp.map(s => s.ok2 ? s.y2 : NaN)) : 0;
     const tk = state.task, timed = tk && tk.plan && tk.t0 != null;
     const head = ['t_s', 'h_deg', 'v_deg', 'valid', 'interpolated', 'speed_deg_s', 'event'];
@@ -1889,6 +2237,7 @@ const OT = (() => {
       ['task_start_clip_s', tk.t0 != null ? (tk.t0 * F).toFixed(3) : ''], ['target_amplitude_deg', tk.plan && tk.plan.amp ? tk.plan.amp : ''],
       ['capture_speed_factor', F], ['frame_rate_fps', res.fps.toFixed(1)], ['duration_s', res.duration.toFixed(2)], ['frames_tracked_pct', (res.validPct * 100).toFixed(1)],
       ['eyes_tracked', state.samples.some(s => 'ok2' in s) ? 2 : 1], ['fixed_point', state.ref ? 'yes' : 'no'], ['mirrored', $('#mirrored').checked ? 'yes' : 'no'],
+      ['calibration_horizontal', state.cal ? state.cal.h : 1], ['calibration_vertical', state.cal ? state.cal.v : 1],
       ['generated', new Date().toISOString()],
     ];
     const lines = ['section,name,value,unit,basis'];
@@ -1902,6 +2251,7 @@ const OT = (() => {
       { label: 'Fast events', value: res.events.length, unit: '', basis: `Median peak speed ${fmt(res.medianPeakVel, 0)} deg/s` },
     ];
     [...measures, ...base].forEach(mm => lines.push(['measure', mm.label, mm.text || (Number.isFinite(mm.value) ? +mm.value.toFixed(4) : ''), (mm.unit || '').replace('°', 'deg'), mm.basis].map(q).join(',')));
+    if (state.check) state.check.items.forEach(it => lines.push(['check', `${it.label} (${it.status})`, it.value, '', it.advice].map(q).join(',')));
     if (tk.out && tk.out.trials) {
       lines.push('', ['trial', ...tk.out.trialCols].map(q).join(','));
       tk.out.trials.forEach((r, k) => lines.push([k + 1, ...r].map(q).join(',')));
@@ -1913,6 +2263,36 @@ const OT = (() => {
     const task = state.task && state.task.task !== 'free' ? `-${state.task.task}` : '';
     return `ocutrace-${base}${task}-${kind}-${new Date().toISOString().slice(0, 10)}.csv`;
   }
+  // Eye-Tracking-BIDS dataset as a zip: physio files are gzipped with the browser's CompressionStream.
+  async function gzip(text) {
+    const cs = new CompressionStream('gzip');
+    const out = new Blob([text]).stream().pipeThrough(cs);
+    return new Uint8Array(await new Response(out).arrayBuffer());
+  }
+  function eyeSides() {
+    if (!state.src || state.src.kind !== 'video' || !state.iris) return ['n/a', 'n/a'];
+    const mirrored = $('#mirrored').checked;
+    if (state.iris2) return rightEyeKey() === 'a' ? ['right', 'left'] : ['left', 'right'];
+    // One eye: in an unmirrored front view the subject's right eye sits in the left half of the picture.
+    return [(state.iris.x < state.src.vw / 2) !== mirrored ? 'right' : 'left'];
+  }
+  $('#saveBids').addEventListener('click', async () => {
+    if (!state.result) return;
+    if (typeof CompressionStream === 'undefined') { $('#csvStatus').textContent = 'This browser cannot compress files, which BIDS requires. Use a current Chrome, Edge, Firefox or Safari.'; return; }
+    try {
+      const tk = state.task, sub = $('#bidsSub').value.replace(/[^A-Za-z0-9]/g, '') || '01';
+      const files = OT.bidsFiles(state.calSamples, state.result, { sub, task: tk.task, plan: tk.plan, t0: tk.t0, eyes: eyeSides(),
+        source: state.resultLabel, calibration: state.cal, measuresCsv: buildSummary() });
+      const root = `ocutrace-bids-sub-${sub}-task-${tk.task}`;
+      const entries = [];
+      for (const f of files) entries.push({ path: `${root}/${f.path}`, bytes: f.gzip ? await gzip(f.text) : new TextEncoder().encode(f.text) });
+      const url = URL.createObjectURL(new Blob([OT.zip(entries)], { type: 'application/zip' }));
+      const a = document.createElement('a'); a.href = url; a.download = `${root}.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      $('#csvStatus').textContent = `Saved a BIDS dataset with ${files.length} files.`;
+    } catch (e) { $('#csvStatus').textContent = 'The BIDS export failed: ' + (e && e.message || e); }
+  });
   $('#saveSummary').addEventListener('click', async () => {
     if (!downloads || !state.result) return;
     try { await downloads.save({ filename: csvName('measures'), data: buildSummary() }); $('#csvStatus').textContent = 'Measures saved.'; }
