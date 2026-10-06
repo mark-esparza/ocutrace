@@ -1,0 +1,24 @@
+OcuTrace — Notices
+Copyright (c) 2026 Mark Esparza.
+
+OcuTrace is released under the MIT License (see LICENSE).
+
+THIRD-PARTY SOFTWARE AND DATA
+- None. OcuTrace is a single static page with no external libraries, fonts,
+  or network requests. Video is processed in the browser and never uploaded.
+
+NOTES
+- The methods OcuTrace re-implements (dark-pupil/iris localization with
+  centroid refinement, template matching for head-movement compensation,
+  velocity-threshold detection of fast eye movements, slow phase velocity and
+  square wave jerk measures, and the conversion from iris displacement to
+  degrees of rotation) are published or standard methods in oculomotor
+  research and are credited to their original authors. The MIT License covers
+  OcuTrace's own source code and expression, not these underlying methods.
+- OcuTrace is a research prototype. It is not a medical device, has not been
+  cleared or approved by any regulator, and must not be used for diagnosis or
+  treatment decisions.
+
+This file is informational and does not constitute legal advice. Confirm
+regulatory and third-party compliance with qualified counsel before any
+clinical or commercial use.

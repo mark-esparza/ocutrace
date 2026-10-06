@@ -1,3 +1,6 @@
+// OcuTrace page: capture, marking, tracking loop, charts, and stimulus screen.
+// Copyright (c) 2026 Mark Esparza. Released under the MIT License; see LICENSE.
+
 (() => {
   const $ = s => document.querySelector(s);
   const N = 120;               // tracking crop size, px

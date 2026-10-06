@@ -4,6 +4,12 @@ OcuTrace turns a phone video of the eyes into a nystagmus and saccade recording.
 
 **Live:** https://mark-esparza.github.io/ocutrace/
 
+**Author:** Mark Esparza ([ORCID 0009-0000-5171-102X](https://orcid.org/0009-0000-5171-102X)) · [mark-esparza.github.io](https://mark-esparza.github.io)
+
+> **Copyright © 2026 Mark Esparza.** OcuTrace is open-source software released under the
+> [MIT License](LICENSE). See [NOTICE](NOTICE) for method credits and the medical-use
+> disclaimer. If you use OcuTrace in research, please cite it (see [CITATION.cff](CITATION.cff)).
+
 ## How it works
 
 1. Record a clip with the phone camera or choose one you already have. The video is processed in the browser and never uploaded.
@@ -28,4 +34,12 @@ A Stimulus tab runs fixation, gaze holding, saccade, smooth pursuit and optokine
 
 ## Development
 
-The tool is a single static `index.html` with no external dependencies. Edit the files in `src/`, then run `node build.js` to rebuild it. `node test/synthetic.test.js` renders a synthetic eye with known right-beating nystagmus and checks that the tracker and analysis recover it.
+The tool is a single static `index.html` with no external dependencies. Edit the files in `src/`, then run `node build.js` to rebuild it. `node test/synthetic.test.js` renders a synthetic eye with known right-beating nystagmus and checks that the tracker and analysis recover it, exiting non-zero if any check fails. CI runs it on every push, along with a check that `index.html` was rebuilt from `src/`.
+
+## Citation
+
+If you use this software, please cite it using the metadata in [CITATION.cff](CITATION.cff). GitHub shows a "Cite this repository" button with formatted citations.
+
+## License
+
+MIT License. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

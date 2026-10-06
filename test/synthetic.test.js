@@ -1,5 +1,16 @@
 const OT = require('../src/core.js');
 
+let failures = 0;
+function check(name, ok, got) {
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  (got ${got})`);
+  if (!ok) failures++;
+}
+const within = (x, lo, hi) => Number.isFinite(x) && x >= lo && x <= hi;
+
+// Seeded pixel noise so every run renders the same clip (override with SEED=n).
+let seed = Number(process.env.SEED) || 12345;
+const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+
 const VW = 360, VH = 240, R = 24, CX = 180, CY = 120;
 function renderFrame(hDeg, vDeg, blink) {
   const img = new Float32Array(VW * VH);
@@ -20,7 +31,7 @@ function renderFrame(hDeg, vDeg, blink) {
       }
       acc += v;
     }
-    img[y * VW + x] = acc / (SS * SS) + (Math.random() - 0.5) * 6;
+    img[y * VW + x] = acc / (SS * SS) + (rand() - 0.5) * 6;
   }
   return img;
 }
@@ -43,9 +54,9 @@ const f0 = renderFrame(wave[0].h, wave[0].v, false);
 const tapX = CX + 3, tapY = CY - 2;
 const wide = Math.round(0.3 * Math.min(VW, VH)) * 2; // 144 px
 const ws = N / wide;
-const est = OT.estimateRadius(crop(f0, tapX - wide / 2, tapY - wide / 2, wide, N), N, N / 2, N / 2, 3, 45);
+const est = OT.estimateRadius(crop(f0, tapX - wide / 2, tapY - wide / 2, wide, N), N, N / 2 - 0.5, N / 2 - 0.5, 3, 45);
 let r = est.r / ws;
-let cx = tapX - wide / 2 + est.x / ws, cy = tapY - wide / 2 + est.y / ws;
+let cx = tapX - wide / 2 + (est.x + 0.5) / ws, cy = tapY - wide / 2 + (est.y + 0.5) / ws;
 console.log('radius est (video px):', r.toFixed(2), 'true', R, 'center', cx.toFixed(1), cy.toFixed(1));
 
 let refScore = null;
@@ -58,10 +69,10 @@ for (const w of wave) {
   let sx = Math.max(0, Math.min(VW - side, cx - side / 2)), sy = Math.max(0, Math.min(VH - side, cy - side / 2));
   const g = crop(img, sx, sy, side, N);
   const s = N / side;
-  const loc = OT.locateIris(g, N, (cx - sx) * s, (cy - sy) * s, r * s);
+  const loc = OT.locateIris(g, N, (cx - sx) * s - 0.5, (cy - sy) * s - 0.5, r * s);
   if (refScore === null) refScore = loc.score;
   const conf = loc.score / refScore;
-  const nx = sx + loc.x / s, ny = sy + loc.y / s;
+  const nx = sx + (loc.x + 0.5) / s, ny = sy + (loc.y + 0.5) / s;
   const jump = Math.hypot(nx - cx, ny - cy);
   const ok = conf >= 0.45 && jump <= 1.5 * r;
   if (ok) { cx = nx; cy = ny; }
@@ -94,3 +105,25 @@ console.log('Fixation test: events', r2.events.length, 'SWJ', r2.swj, 'per min',
 console.log(samples.slice(0,8).map((s,i)=>`${s.x.toFixed(2)} vs ${truth[i].h.toFixed(2)}`).join(' | '));
 const diffs = samples.map((s,i)=> s.ok && !truth[i].blink ? s.x - truth[i].h : NaN).filter(Number.isFinite);
 console.log('mean signed err', (diffs.reduce((a,b)=>a+b,0)/diffs.length).toFixed(3), 'sd', Math.sqrt(diffs.reduce((a,b)=>a+(b-diffs.reduce((p,q)=>p+q,0)/diffs.length)**2,0)/diffs.length).toFixed(3));
+
+// Truth from OT.syntheticWave: right-beating, slow phase -6 deg/s, 2.5 beats/s, 15 beats of which one
+// falls in the blink, no vertical nystagmus, one 150 ms blink. The fixation trace has 4 square wave jerks.
+console.log('');
+check('iris radius within 5% of true', within(r, 0.95 * R, 1.05 * R), r.toFixed(2));
+check('median abs H error < 0.15 deg', OT.median(err) < 0.15, OT.median(err).toFixed(3));
+const meanErr = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+check('mean signed H error within 0.1 deg', Math.abs(meanErr) < 0.1, meanErr.toFixed(3));
+check('every blink frame flagged invalid', blinkFlagged === truth.filter(t => t.blink).length, blinkFlagged);
+check('no non-blink frame flagged invalid', samples.every((s, i) => s.ok || truth[i].blink), samples.filter((s, i) => !s.ok && !truth[i].blink).length);
+check('horizontal nystagmus present', res.h.present === true, res.h.present);
+check('direction is right-beating', res.h.direction === 'Right-beating', res.h.direction);
+check('13-15 fast phases', within(res.h.fastCount, 13, 15), res.h.fastCount);
+check('slow phase velocity -6 deg/s +-10%', within(res.h.medSpv, -6.6, -5.4), res.h.medSpv.toFixed(2));
+check('beat frequency 2.5 Hz +-0.3', within(res.h.beatHz, 2.2, 2.8), res.h.beatHz.toFixed(2));
+check('no vertical nystagmus', res.v.present === false, res.v.present);
+check('nystagmus not counted as square wave jerks', res.swj === 0, res.swj);
+check('fixation: 4 square wave jerks', r2.swj === 4, r2.swj);
+check('fixation: no nystagmus', r2.nyst.present === false, r2.nyst.present);
+
+console.log(failures ? `\n${failures} check(s) failed` : '\nall checks passed');
+process.exit(failures ? 1 : 0);
