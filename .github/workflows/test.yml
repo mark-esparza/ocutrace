@@ -14,6 +14,8 @@ jobs:
           node-version: 20
       - name: Synthetic tracker test
         run: node test/synthetic.test.js
+      - name: Task battery measures test
+        run: node test/tasks.test.js
       - name: index.html matches src/
         run: |
           node build.js

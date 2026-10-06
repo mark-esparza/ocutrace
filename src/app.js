@@ -5,7 +5,7 @@
   const $ = s => document.querySelector(s);
   const N = 120;               // tracking crop size, px
   const WIDE = 200;            // crop size used to size the iris at the tap
-  const MAX_SECONDS = 60;
+  const MAX_SECONDS = 240;
 
   // ---------- small helpers ----------
   const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -68,9 +68,11 @@
   const state = {
     src: null,         // {kind, vw, vh, drawable, label}
     iris: null,        // {x, y, r0}
+    iris2: null,       // the other eye, optional
     ref: null,         // {x, y}
     marking: 'iris',
     result: null,
+    task: null,        // {task, plan, t0, out}
     samples: null,
     busy: false,
   };
@@ -102,6 +104,13 @@
 
   // ---------- marking ----------
   function irisRadius() { return state.iris ? state.iris.r0 * (+$('#irisSize').value / 100) : 0; }
+  function irisRadius2() { return state.iris2 ? state.iris2.r0 * (+$('#irisSize').value / 100) : 0; }
+  function irisAt(x, y) {
+    const side = 0.6 * Math.min(state.src.vw, state.src.vh);
+    const c = cropGray(state.src.drawable, state.src.vw, state.src.vh, x, y, side, WIDE);
+    const est = OT.estimateRadius(c.g, WIDE, (x - c.sx) * c.s - 0.5, (y - c.sy) * c.s - 0.5, 3, 60);
+    return { x: c.sx + (est.x + 0.5) / c.s, y: c.sy + (est.y + 0.5) / c.s, r0: est.r / c.s };
+  }
   function renderFrame() {
     const src = state.src; if (!src) return;
     const ctx = frameCanvas.getContext('2d');
@@ -126,6 +135,11 @@
       ctx.moveTo(x, y - rr - 6 * lw); ctx.lineTo(x, y - rr + 3 * lw); ctx.moveTo(x, y + rr - 3 * lw); ctx.lineTo(x, y + rr + 6 * lw);
       ctx.stroke();
     }
+    if (state.iris2) {
+      const x = state.iris2.x * k, y = state.iris2.y * k, rr = irisRadius2() * k;
+      ctx.strokeStyle = '#1f8fff'; ctx.lineWidth = lw;
+      ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2); ctx.stroke();
+    }
     if (state.ref) {
       ctx.strokeStyle = '#ffffff'; ctx.lineWidth = lw;
       const s = 10 * lw, x = state.ref.x * k, y = state.ref.y * k;
@@ -134,6 +148,7 @@
     $('#markSource').textContent = `${src.label}, ${src.vw} × ${src.vh}`;
     $('#trackBtn').disabled = !state.iris || state.busy;
     $('#clearRefBtn').disabled = !state.ref || state.busy;
+    $('#clearEye2Btn').disabled = !state.iris2 || state.busy;
   }
   frameCanvas.addEventListener('pointerdown', e => {
     if (!state.src || state.busy || !state.marking) return;
@@ -141,13 +156,14 @@
     const x = (e.clientX - rect.left) / rect.width * state.src.vw;
     const y = (e.clientY - rect.top) / rect.height * state.src.vh;
     if (state.marking === 'iris') {
-      const side = 0.6 * Math.min(state.src.vw, state.src.vh);
-      const c = cropGray(state.src.drawable, state.src.vw, state.src.vh, x, y, side, WIDE);
-      const est = OT.estimateRadius(c.g, WIDE, (x - c.sx) * c.s - 0.5, (y - c.sy) * c.s - 0.5, 3, 60);
-      state.iris = { x: c.sx + (est.x + 0.5) / c.s, y: c.sy + (est.y + 0.5) / c.s, r0: est.r / c.s };
+      state.iris = irisAt(x, y);
       $('#irisSize').value = 100;
       state.marking = 'ref';
       $('#markStatus').textContent = 'Iris marked. Adjust the outline if it does not sit on the iris edge, then tap a fixed point or track.';
+    } else if (state.marking === 'iris2') {
+      state.iris2 = irisAt(x, y);
+      state.marking = null;
+      $('#markStatus').textContent = 'Other eye marked in blue. Both eyes will be tracked.';
     } else {
       state.ref = { x, y };
       state.marking = null;
@@ -159,47 +175,73 @@
   $('#markIrisBtn').addEventListener('click', () => { state.marking = 'iris'; $('#markStatus').textContent = 'Tap the center of one iris.'; renderFrame(); });
   $('#markRefBtn').addEventListener('click', () => { state.marking = 'ref'; $('#markStatus').textContent = 'Tap a fixed point such as a sticker on the nose bridge.'; renderFrame(); });
   $('#clearRefBtn').addEventListener('click', () => { state.ref = null; renderFrame(); });
+  $('#markEye2Btn').addEventListener('click', () => { state.marking = 'iris2'; $('#markStatus').textContent = 'Tap the center of the other iris.'; renderFrame(); });
+  $('#clearEye2Btn').addEventListener('click', () => { state.iris2 = null; renderFrame(); });
 
   // ---------- tracker ----------
-  function makeTracker(src, iris, r, ref) {
-    let cx = iris.x, cy = iris.y, rx = ref && ref.x, ry = ref && ref.y;
-    let refScore = null, tpl = null;
-    const TH = 12, SEARCH = 16;
-    let origin = null;
-    return function step(drawable) {
+  function makeIrisTracker(src, iris, r) {
+    let cx = iris.x, cy = iris.y, refScore = null;
+    return drawable => {
       const c = cropGray(drawable, src.vw, src.vh, cx, cy, 6 * r, N);
       const loc = OT.locateIris(c.g, N, (cx - c.sx) * c.s - 0.5, (cy - c.sy) * c.s - 0.5, r * c.s);
       const nx = c.sx + (loc.x + 0.5) / c.s, ny = c.sy + (loc.y + 0.5) / c.s;
       if (refScore === null && loc.score > 0) refScore = loc.score;
       const conf = refScore ? loc.score / refScore : 0;
-      let ok = conf >= 0.45 && Math.hypot(nx - cx, ny - cy) <= 1.5 * r;
+      const ok = conf >= 0.45 && Math.hypot(nx - cx, ny - cy) <= 1.5 * r;
       if (ok) { cx = nx; cy = ny; }
-      if (ref) {
-        const rc = cropGray(drawable, src.vw, src.vh, rx, ry, 6 * r, N);
-        const gx = (rx - rc.sx) * rc.s - 0.5, gy = (ry - rc.sy) * rc.s - 0.5;
-        if (!tpl) tpl = OT.cutTemplate(rc.g, N, gx, gy, TH);
-        const m = OT.matchTemplate(rc.g, N, tpl, TH, gx, gy, SEARCH);
-        if (Number.isFinite(m.sad)) { rx = rc.sx + (m.x + 0.5) / rc.s; ry = rc.sy + (m.y + 0.5) / rc.s; } else ok = false;
-      }
-      const ex = nx - (ref ? rx : 0), ey = ny - (ref ? ry : 0);
-      if (ok && !origin) origin = { x: ex, y: ey };
-      if (!ok || !origin) return { ok: false };
-      return { ok, dx: ex - origin.x, dy: ey - origin.y };
+      return { ok, x: nx, y: ny };
     };
   }
-  function toDeg(trk, r, mirrored) {
-    if (!trk.ok) return { x: NaN, y: NaN, ok: false };
-    return { x: OT.pxToDeg(mirrored ? trk.dx : -trk.dx, r), y: OT.pxToDeg(-trk.dy, r), ok: true };
+  function makeRefTracker(src, ref, r) {
+    let rx = ref.x, ry = ref.y, tpl = null;
+    const TH = 12, SEARCH = 16;
+    return drawable => {
+      const rc = cropGray(drawable, src.vw, src.vh, rx, ry, 6 * r, N);
+      const gx = (rx - rc.sx) * rc.s - 0.5, gy = (ry - rc.sy) * rc.s - 0.5;
+      if (!tpl) tpl = OT.cutTemplate(rc.g, N, gx, gy, TH);
+      const m = OT.matchTemplate(rc.g, N, tpl, TH, gx, gy, SEARCH);
+      if (!Number.isFinite(m.sad)) return { ok: false, x: rx, y: ry };
+      rx = rc.sx + (m.x + 0.5) / rc.s; ry = rc.sy + (m.y + 0.5) / rc.s;
+      return { ok: true, x: rx, y: ry };
+    };
+  }
+  // Iris positions relative to the fixed point (when marked), measured from the first good frame.
+  function makeTracker(src, iris, r, ref, iris2, r2) {
+    const e1 = makeIrisTracker(src, iris, r), e2 = iris2 ? makeIrisTracker(src, iris2, r2) : null;
+    const rt = ref ? makeRefTracker(src, ref, r) : null;
+    let o1 = null, o2 = null;
+    return function step(drawable) {
+      const a = e1(drawable), b = e2 ? e2(drawable) : null, f = rt ? rt(drawable) : { ok: true, x: 0, y: 0 };
+      const out = { ok: a.ok && f.ok };
+      if (out.ok) { const ex = a.x - f.x, ey = a.y - f.y; if (!o1) o1 = { x: ex, y: ey }; out.dx = ex - o1.x; out.dy = ey - o1.y; }
+      if (b) {
+        out.ok2 = b.ok && f.ok;
+        if (out.ok2) { const ex = b.x - f.x, ey = b.y - f.y; if (!o2) o2 = { x: ex, y: ey }; out.dx2 = ex - o2.x; out.dy2 = ey - o2.y; }
+      }
+      return out;
+    };
+  }
+  function toDeg(trk, r, r2, mirrored) {
+    const sx = mirrored ? 1 : -1;
+    const out = trk.ok ? { x: OT.pxToDeg(sx * trk.dx, r), y: OT.pxToDeg(-trk.dy, r), ok: true } : { x: NaN, y: NaN, ok: false };
+    if ('ok2' in trk) Object.assign(out, trk.ok2 ? { x2: OT.pxToDeg(sx * trk.dx2, r2), y2: OT.pxToDeg(-trk.dy2, r2), ok2: true } : { x2: NaN, y2: NaN, ok2: false });
+    return out;
+  }
+  // Which tracked eye is the subject's right: in an unmirrored front view it is the one further left in the picture.
+  function rightEyeKey() {
+    if (!state.iris2) return 'a';
+    const firstIsLeftInImage = state.iris.x < state.iris2.x;
+    return firstIsLeftInImage !== $('#mirrored').checked ? 'a' : 'b';
   }
 
   async function trackSynthetic() {
-    const r = irisRadius();
-    const step = makeTracker(state.src, state.iris, r, state.ref);
+    const r = irisRadius(), r2 = irisRadius2();
+    const step = makeTracker(state.src, state.iris, r, state.ref, state.iris2, r2);
     const samples = [];
     for (let i = 0; i < synWave.length; i++) {
       const w = synWave[i];
       drawSynEye(w.h, w.v, w.blink);
-      const d = toDeg(step(synCanvas), r, false);
+      const d = toDeg(step(synCanvas), r, r2, false);
       samples.push({ t: w.t, ...d });
       if (i % 40 === 0) { setProgress(i / synWave.length); await sleep(0); }
     }
@@ -209,10 +251,10 @@
 
   function trackVideo() {
     return new Promise((resolve, reject) => {
-      const r = irisRadius();
+      const r = irisRadius(), r2 = irisRadius2();
       const F = +$('#slowmo').value || 1;
       const mirrored = $('#mirrored').checked;
-      const step = makeTracker(state.src, state.iris, r, state.ref);
+      const step = makeTracker(state.src, state.iris, r, state.ref, state.iris2, r2);
       const samples = [];
       const limit = Math.min(vid.duration || MAX_SECONDS * F, MAX_SECONDS * F);
       let last = -1, done = false;
@@ -220,7 +262,7 @@
       const handle = mediaTime => {
         if (mediaTime === last) return;
         last = mediaTime;
-        samples.push({ t: mediaTime / F, ...toDeg(step(vid), r, mirrored) });
+        samples.push({ t: mediaTime / F, ...toDeg(step(vid), r, r2, mirrored) });
         setProgress(mediaTime / limit);
       };
       vid.currentTime = 0;
@@ -284,6 +326,7 @@
     const est = OT.estimateRadius(c.g, WIDE, (SYN.CX + 4 - c.sx) * c.s - 0.5, (SYN.CY - 3 - c.sy) * c.s - 0.5, 3, 60);
     state.iris = { x: c.sx + (est.x + 0.5) / c.s, y: c.sy + (est.y + 0.5) / c.s, r0: est.r / c.s };
     state.ref = { x: SYN.CX + 190, y: 60 };
+    state.iris2 = null;
     state.marking = null;
     $('#irisSize').value = 100;
     $('#srcStatus').textContent = 'Below is a computer drawn eye, run through the same tracker, so you can see a complete reading before loading your own clip.';
@@ -316,8 +359,10 @@
     if (!vid.videoWidth) { $('#srcStatus').textContent = 'This file has no video track.'; $('#srcStatus').classList.add('err'); return; }
     await seek(firstFrameTime());
     state.src = { kind: 'video', vw: vid.videoWidth, vh: vid.videoHeight, drawable: vid, label: pendingFile && pendingFile.name ? pendingFile.name : 'Your video' };
-    state.iris = null; state.ref = null; state.marking = 'iris';
+    state.iris = null; state.iris2 = null; state.ref = null; state.marking = 'iris';
     describeVideo();
+    $('#anStart').value = ''; $('#syncStatus').textContent = '';
+    if (OT.TASKS[$('#anTask').value].timed) findBeep();
     $('#markStatus').textContent = 'Tap the center of one iris.';
     renderFrame();
     $('#markCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
@@ -344,15 +389,77 @@
       (secs > MAX_SECONDS ? `. Only the first ${MAX_SECONDS} s will be analyzed.` : '.') +
       ` Tracking takes about ${fmt(limit * F * 2, 0)} s.`;
   }
-  $('#slowmo').addEventListener('change', describeVideo);
+  $('#slowmo').addEventListener('change', () => { describeVideo(); refreshResult(); });
+  $('#mirrored').addEventListener('change', refreshResult);
+
+  // ---------- task and start beep ----------
+  function syncTaskFields() {
+    const def = OT.TASKS[$('#anTask').value];
+    $('#anAmpField').hidden = !(def.amp > 0);
+    $('#anAmpVField').hidden = !def.ampV;
+    $('#anStartField').hidden = $('#beepField').hidden = !def.timed;
+    if (!def.timed) $('#syncStatus').textContent = '';
+  }
+  $('#anTask').addEventListener('change', () => {
+    const def = OT.TASKS[$('#anTask').value];
+    if (def.amp > 0) $('#anAmp').value = def.amp;
+    if (def.ampV) $('#anAmpV').value = def.ampV;
+    syncTaskFields();
+    if (def.timed && state.src && state.src.kind === 'video' && !$('#anStart').value) findBeep();
+    refreshResult();
+  });
+  $('#anAmp').addEventListener('change', refreshResult);
+  $('#anAmpV').addEventListener('change', refreshResult);
+  $('#anStart').addEventListener('change', () => { $('#syncStatus').textContent = $('#anStart').value ? 'Task start entered by hand.' : ''; refreshResult(); });
+  $('#beepBtn').addEventListener('click', () => findBeep());
+  let beepRun = 0;
+  async function findBeep() {
+    const status = $('#syncStatus'), run = ++beepRun;
+    status.classList.remove('err');
+    if (!pendingFile || !state.src || state.src.kind !== 'video') { status.textContent = 'Load a clip first. The synthetic eye has no sound.'; return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { status.textContent = 'This browser cannot read the sound track. Enter the task start by hand.'; return; }
+    status.textContent = 'Listening for the start beep…';
+    try {
+      const buf = await pendingFile.arrayBuffer();
+      const ac = new AC();
+      const audio = await new Promise((res, rej) => { const p = ac.decodeAudioData(buf, res, rej); if (p && p.then) p.then(res, rej); });
+      ac.close && ac.close();
+      if (run !== beepRun) return;
+      const ch = audio.getChannelData(0);
+      const F = +$('#slowmo').value || 1;
+      let hit = OT.findStartBeep(ch, audio.sampleRate, { slowFactor: 1 });
+      if (!hit && F > 1) hit = OT.findStartBeep(ch, audio.sampleRate, { slowFactor: F });
+      if (!hit) { status.textContent = 'No start beep found. Check that the clip has sound, or enter the time the third beep sounds.'; status.classList.add('err'); return; }
+      $('#anStart').value = hit.t0.toFixed(3);
+      status.textContent = `Start beep found at ${hit.t0.toFixed(2)} s into the clip.`;
+      refreshResult();
+    } catch (e) {
+      if (run !== beepRun) return;
+      status.textContent = 'The sound track could not be read. Enter the time the third beep sounds.'; status.classList.add('err');
+    }
+  }
+  function taskContext() {
+    const task = $('#anTask').value, def = OT.TASKS[task];
+    const plan = OT.makePlan(task, +$('#anAmp').value || def.amp, def.ampV ? +$('#anAmpV').value || def.ampV : 0);
+    const F = +$('#slowmo').value || 1;
+    const start = parseFloat($('#anStart').value);
+    const synthetic = state.src && state.src.kind === 'synthetic';
+    const t0 = def.timed && !synthetic && Number.isFinite(start) ? start / F : null;
+    return { task, def, plan: def.timed ? plan : null, t0 };
+  }
+  function refreshResult() { if (state.samples && !state.busy) showResult(state.samples, state.resultLabel, state.resultSynthetic); }
 
   // ---------- results ----------
   const SLOW_DIR = { 'Right-beating': 'leftward', 'Left-beating': 'rightward', 'Upbeat': 'downward', 'Downbeat': 'upward' };
   const FAST_DIR = { 'Right-beating': 'rightward', 'Left-beating': 'leftward', 'Upbeat': 'upward', 'Downbeat': 'downward' };
   function showResult(samples, label, synthetic) {
-    state.samples = samples;
+    state.samples = samples; state.resultLabel = label; state.resultSynthetic = synthetic;
     const res = OT.analyze(samples);
     state.result = res;
+    const tc = taskContext();
+    const out = tc.task !== 'free' || samples.some(s => s.ok2) ? OT.taskMeasures(tc.task, samples, res, tc.plan, tc.t0, { rightEye: rightEyeKey() }) : null;
+    state.task = { ...tc, out };
     $('#resultSource').textContent = synthetic
       ? 'Synthetic eye with right-beating nystagmus built in at 6°/s and 2.5 beats/s. Not patient data.'
       : `${label}, ${fmt(res.duration, 1)} s at ${fmt(res.fps, 0)} fps.`;
@@ -368,8 +475,13 @@
       const drift = Math.max(Math.abs(res.h.medSpv) || 0, Math.abs(res.v.medSpv) || 0);
       $('#verdictSub').textContent = `Drift between fast events peaked at ${fmt(drift)}°/s, with no consistent beat direction above the 2°/s cutoff. A prototype reading, not a diagnosis.`;
     }
+    if (out && out.headline) {
+      call.textContent = out.headline;
+      $('#verdictSub').textContent = `${out.sub} A prototype reading, not a diagnosis.`;
+      $('#verdictBox').className = 'verdict' + (/nystagmus/i.test(out.headline) && !/^No /.test(out.headline) ? ' found' : '');
+    }
     const axisName = ny.axis === 'h' ? 'horizontal' : 'vertical';
-    const rows = [
+    let rows = [
       ['Slow phase velocity', fmt(Math.abs(ny.medSpv)), '°/s', ny.spv.length ? `Median of ${ny.spv.length} slow phases, ${axisName}` : 'No clean slow phases between events'],
       ['Beat frequency', fmt(ny.beatHz), 'beats/s', ny.fastCount ? `${ny.fastCount} ${FAST_DIR[ny.direction]} fast phases` : 'No fast phases found'],
       ['Square wave jerks', fmt(res.swjPerMin, 0), 'per min', `${res.swj} found. Read only from fixation recordings`],
@@ -377,6 +489,11 @@
       ['Frames tracked', fmt(res.validPct * 100, 0), '%', `${res.n} frames over ${fmt(res.duration, 1)} s`],
       ['Frame rate', fmt(res.fps, 0), 'fps', synthetic ? 'Synthetic clip' : 'After slow motion correction'],
     ];
+    if (out) {
+      const digits = u => u === 'ms' || u === '%' || u === 'per min' ? 0 : u === '' || u === 'deg²' ? 2 : 1;
+      const taskRows = out.measures.map(mm => [mm.label, mm.text || fmt(mm.value, mm.digits ?? digits(mm.unit)), Number.isFinite(mm.value) && !mm.text ? mm.unit : '', mm.basis]);
+      rows = tc.task === 'free' ? [...rows, ...taskRows] : [...taskRows, ...rows.slice(4)];
+    }
     const mb = $('#measures tbody'); mb.innerHTML = '';
     for (const [name, v, unit, basis] of rows) {
       const tr = document.createElement('tr');
@@ -393,6 +510,18 @@
       note.lastChild.textContent = `At ${fmt(res.fps, 0)} fps, peak speeds read low and brief saccades can be missed. Record in 240 fps slow motion when saccade speed matters.`;
     }
     else note.hidden = true;
+
+    const td = $('#trialDetails');
+    if (out && out.trials && out.trials.length) {
+      td.hidden = false;
+      $('#trialSummary').textContent = `Trials (${out.trials.length})`;
+      const head = $('#trialTable thead'), body = $('#trialTable tbody');
+      head.innerHTML = ''; body.innerHTML = '';
+      const hr = document.createElement('tr');
+      out.trialCols.forEach(c => { const th = document.createElement('th'); th.textContent = c; hr.appendChild(th); });
+      head.appendChild(hr);
+      out.trials.forEach(row => { const tr = document.createElement('tr'); row.forEach(v => { const c = document.createElement('td'); c.textContent = v; tr.appendChild(c); }); body.appendChild(tr); });
+    } else td.hidden = true;
 
     const tb = $('#evTable tbody'); tb.innerHTML = '';
     res.events.slice(0, 40).forEach(e => {
@@ -431,16 +560,20 @@
     let limH = 1, limV = 1, spMax = res.threshold * 1.5;
     for (let i = 0; i < res.n; i++) if (res.ok[i]) { limH = Math.max(limH, Math.abs(res.x[i])); limV = Math.max(limV, Math.abs(res.y[i])); }
     for (const v of res.sp) if (Number.isFinite(v)) spMax = Math.max(spMax, v);
+    // Target trace when the clip is lined up with a stimulus plan.
+    const tk = state.task, tgt = tk && tk.plan && tk.t0 != null ? t.map(tt => tk.plan.goal(tt - tk.t0)) : null;
+    if (tgt) for (const g of tgt) if (g) { limH = Math.max(limH, Math.abs(g.x)); limV = Math.max(limV, Math.abs(g.y)); }
     limH = Math.ceil(limH * 1.1); limV = Math.ceil(limV * 1.1);
     const ink = css('--graph-label'), ink2 = css('--graph-sep'), red = css('--graph-ev'), blue = css('--graph-v'), pen = css('--graph-h');
     const minor = css('--graph-minor'), major = css('--graph-major'), bg = css('--graph-bg');
     const family = css('--font') || 'sans-serif';
     const chans = [
-      { name: 'Horizontal', unit: '°', h: 132, lo: -limH, hi: limH, data: res.x, color: pen, width: 1.7, up: 'R', down: 'L' },
-      { name: 'Vertical', unit: '°', h: 92, lo: -limV, hi: limV, data: res.y, color: blue, width: 1.5, up: 'Up', down: 'Dn' },
+      { name: 'Horizontal', unit: '°', h: 132, lo: -limH, hi: limH, data: res.x, color: pen, width: 1.7, up: 'R', down: 'L', target: tgt && tgt.map(g => g ? g.x : NaN) },
+      { name: 'Vertical', unit: '°', h: 92, lo: -limV, hi: limV, data: res.y, color: blue, width: 1.5, up: 'Up', down: 'Dn', target: tgt && tgt.map(g => g ? g.y : NaN) },
       { name: 'Events', h: 32 },
       { name: 'Speed', unit: '°/s', h: 104, lo: 0, hi: spMax * 1.08, data: res.sp, color: pen, width: 1.3 },
     ];
+    $('#legendTarget').hidden = !tgt;
     const H = TOP + chans.reduce((a, c) => a + c.h, 0) + AXIS;
     const dpr = window.devicePixelRatio || 1;
     cv.style.width = W + 'px'; cv.style.height = H + 'px';
@@ -485,6 +618,18 @@
       if (c.name === 'Speed') {
         ctx.setLineDash([6, 4]); hline(Y(res.threshold), GUT, W - RIGHT, red, 1.2); ctx.setLineDash([]);
       }
+      if (c.target) {
+        ctx.strokeStyle = css('--graph-target'); ctx.lineWidth = 1.4; ctx.setLineDash([5, 3]); ctx.beginPath();
+        let on = false;
+        for (let i = 0; i < t.length; i++) {
+          const v = c.target[i];
+          if (!Number.isFinite(v)) { on = false; continue; }
+          const px = X(t[i]), py = Y(Math.max(c.lo, Math.min(c.hi, v)));
+          if (on) ctx.lineTo(px, py); else { ctx.moveTo(px, py); on = true; }
+        }
+        ctx.stroke(); ctx.setLineDash([]);
+      }
+      if (tk && tk.t0 != null && tk.t0 >= t0 && tk.t0 <= t1) { ctx.setLineDash([2, 3]); vline(X(tk.t0), top, bot, css('--graph-target'), 1); ctx.setLineDash([]); }
       if (c.data) {
         ctx.strokeStyle = c.color; ctx.lineWidth = c.width; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.beginPath();
         let pen = false;
@@ -525,16 +670,59 @@
     const res = state.result; if (!res) return '';
     const evAt = new Array(res.n).fill('');
     res.events.forEach((e, k) => { for (let i = e.i0; i <= e.i1; i++) evAt[i] = String(k + 1); });
-    const rows = ['t_s,h_deg,v_deg,valid,interpolated,speed_deg_s,event'];
+    const smp = state.samples, two = smp.some(s => 'ok2' in s);
+    const mx2 = two ? OT.median(smp.map(s => s.ok2 ? s.x2 : NaN)) : 0, my2 = two ? OT.median(smp.map(s => s.ok2 ? s.y2 : NaN)) : 0;
+    const tk = state.task, timed = tk && tk.plan && tk.t0 != null;
+    const head = ['t_s', 'h_deg', 'v_deg', 'valid', 'interpolated', 'speed_deg_s', 'event'];
+    if (two) head.push('h2_deg', 'v2_deg', 'valid2');
+    if (timed) head.push('task_t_s', 'target_h_deg', 'target_v_deg');
+    const rows = [head.join(',')];
     for (let i = 0; i < res.n; i++) {
-      rows.push([res.t[i].toFixed(4), res.ok[i] ? res.x[i].toFixed(3) : '', res.ok[i] ? res.y[i].toFixed(3) : '', res.ok[i] ? 1 : 0, res.interp[i] ? 1 : 0, Number.isFinite(res.sp[i]) ? res.sp[i].toFixed(1) : '', evAt[i]].join(','));
+      const r = [res.t[i].toFixed(4), res.ok[i] ? res.x[i].toFixed(3) : '', res.ok[i] ? res.y[i].toFixed(3) : '', res.ok[i] ? 1 : 0, res.interp[i] ? 1 : 0, Number.isFinite(res.sp[i]) ? res.sp[i].toFixed(1) : '', evAt[i]];
+      if (two) { const s = smp[i]; r.push(s.ok2 ? (s.x2 - mx2).toFixed(3) : '', s.ok2 ? (s.y2 - my2).toFixed(3) : '', s.ok2 ? 1 : 0); }
+      if (timed) { const tt = res.t[i] - tk.t0, g = tk.plan.goal(tt); r.push(tt.toFixed(4), g ? g.x.toFixed(2) : '', g ? g.y.toFixed(2) : ''); }
+      rows.push(r.join(','));
     }
     return rows.join('\n') + '\n';
   }
-  function csvName() {
-    const base = (state.src && state.src.kind === 'video' ? state.src.label.replace(/\.[^.]+$/, '') : 'synthetic-eye').replace(/[^\w-]+/g, '-').slice(0, 60);
-    return `ocutrace-${base}-${new Date().toISOString().slice(0, 10)}.csv`;
+  const q = v => { const t = String(v == null ? '' : v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  function buildSummary() {
+    const res = state.result, tk = state.task; if (!res) return '';
+    const F = +$('#slowmo').value || 1;
+    const meta = [
+      ['algorithm_version', OT.ALGO_VERSION], ['source', state.resultLabel], ['task', tk.task], ['task_name', OT.TASKS[tk.task].name],
+      ['task_start_clip_s', tk.t0 != null ? (tk.t0 * F).toFixed(3) : ''], ['target_amplitude_deg', tk.plan && tk.plan.amp ? tk.plan.amp : ''],
+      ['capture_speed_factor', F], ['frame_rate_fps', res.fps.toFixed(1)], ['duration_s', res.duration.toFixed(2)], ['frames_tracked_pct', (res.validPct * 100).toFixed(1)],
+      ['eyes_tracked', state.samples.some(s => 'ok2' in s) ? 2 : 1], ['fixed_point', state.ref ? 'yes' : 'no'], ['mirrored', $('#mirrored').checked ? 'yes' : 'no'],
+      ['generated', new Date().toISOString()],
+    ];
+    const lines = ['section,name,value,unit,basis'];
+    meta.forEach(([k, v]) => lines.push(['recording', k, v, '', ''].map(q).join(',')));
+    const measures = tk.out ? tk.out.measures : [];
+    const base = [
+      { label: 'Nystagmus', text: res.nyst.present ? res.nyst.direction : 'None', unit: '', basis: '' },
+      { label: 'Slow phase velocity', value: Math.abs(res.nyst.medSpv), unit: 'deg/s', basis: 'Dominant axis, whole clip' },
+      { label: 'Beat frequency', value: res.nyst.beatHz, unit: 'beats/s', basis: '' },
+      { label: 'Square wave jerks', value: res.swjPerMin, unit: 'per min', basis: `${res.swj} found` },
+      { label: 'Fast events', value: res.events.length, unit: '', basis: `Median peak speed ${fmt(res.medianPeakVel, 0)} deg/s` },
+    ];
+    [...measures, ...base].forEach(mm => lines.push(['measure', mm.label, mm.text || (Number.isFinite(mm.value) ? +mm.value.toFixed(4) : ''), (mm.unit || '').replace('°', 'deg'), mm.basis].map(q).join(',')));
+    if (tk.out && tk.out.trials) {
+      lines.push('', ['trial', ...tk.out.trialCols].map(q).join(','));
+      tk.out.trials.forEach((r, k) => lines.push([k + 1, ...r].map(q).join(',')));
+    }
+    return lines.join('\n') + '\n';
   }
+  function csvName(kind = 'trace') {
+    const base = (state.src && state.src.kind === 'video' ? state.src.label.replace(/\.[^.]+$/, '') : 'synthetic-eye').replace(/[^\w-]+/g, '-').slice(0, 60);
+    const task = state.task && state.task.task !== 'free' ? `-${state.task.task}` : '';
+    return `ocutrace-${base}${task}-${kind}-${new Date().toISOString().slice(0, 10)}.csv`;
+  }
+  $('#saveSummary').addEventListener('click', async () => {
+    if (!downloads || !state.result) return;
+    try { await downloads.save({ filename: csvName('measures'), data: buildSummary() }); $('#csvStatus').textContent = 'Measures saved.'; }
+    catch (e) { $('#csvStatus').textContent = e && e.code === 'declined' ? 'Save cancelled.' : 'Saving is not available here.'; }
+  });
   $('#saveCsv').addEventListener('click', async () => {
     if (!downloads) return;
     try { await downloads.save({ filename: csvName(), data: buildCsv() }); $('#csvStatus').textContent = 'Saved.'; }
@@ -548,7 +736,8 @@
     } catch (e) { fallback(); }
   });
   if (window.claude && typeof window.claude.use === 'function') {
-    window.claude.use('downloads').then(d => { downloads = d; $('#saveCsv').hidden = !d; }).catch(() => {});
+    $('#saveSummary').hidden = true;
+    window.claude.use('downloads').then(d => { downloads = d; $('#saveCsv').hidden = $('#saveSummary').hidden = !d; }).catch(() => {});
   } else {
     // Ordinary web page (for example GitHub Pages): save through a download link.
     downloads = {
@@ -565,69 +754,160 @@
 
   // ---------- stimulus ----------
   const stage = $('#stage'), stim = $('#stim'), hud = $('#hud');
-  let stimRun = null, wakeLock = null;
+  let stimRun = null, wakeLock = null, actx = null;
+  const PRE_ROLL = 3; // seconds of instructions before the first target; the beeps end it
+  // Screen geometry: degrees of visual angle to canvas pixels, from the screen's physical width and distance.
+  function geometry() {
+    const W = +$('#scrW').value, D = +$('#scrD').value;
+    // iOS reports the portrait width even when rotated, so take the side that matches the current orientation.
+    const sw = screen.width || window.innerWidth, sh = screen.height || window.innerHeight;
+    const cssW = window.innerWidth > window.innerHeight ? Math.max(sw, sh) : Math.min(sw, sh);
+    const cmPerCss = W > 0 && cssW > 0 ? W / cssW : NaN;
+    const dpr = window.devicePixelRatio || 1;
+    const halfW = stim.clientWidth * cmPerCss / 2, halfH = stim.clientHeight * cmPerCss / 2;
+    const deg = cm => Math.atan(cm / D) * 180 / Math.PI;
+    return {
+      ok: Number.isFinite(cmPerCss) && D > 0 && halfW > 0,
+      maxH: deg(halfW - 1), maxV: deg(halfH - 1),
+      px: d => D * Math.tan(d * Math.PI / 180) / cmPerCss * dpr,
+      pxPerDeg: D * Math.PI / 180 / cmPerCss * dpr,
+    };
+  }
+  // The largest standard amplitude that fits this screen, so the analysis knows where targets were.
+  function fitAmp(task, geo) {
+    const def = OT.TASKS[task];
+    if (!(def.amp > 0) || !geo.ok) return { amp: def.amp, ampV: def.ampV || 0 };
+    const amp = Math.max(1, Math.min(def.amp, Math.floor(task === 'sacV' ? geo.maxV : geo.maxH)));
+    const ampV = def.ampV ? Math.max(1, Math.min(def.ampV, amp, Math.floor(geo.maxV))) : 0;
+    return { amp, ampV };
+  }
+  const planFor = (task, geo) => { const f = fitAmp(task, geo); return OT.makePlan(task, f.amp, f.ampV); };
+  function describeGeometry() {
+    const task = $('#task').value, def = OT.TASKS[task], geo = geometry();
+    const el = $('#geomStatus');
+    if (!geo.ok) { el.textContent = 'Enter the screen width and viewing distance so targets land at known angles.'; return; }
+    if (!(def.amp > 0)) { el.textContent = task === 'okn' ? `Stripes move at ${OT.makePlan('okn').oknSpeed}°/s at this distance.` : 'This task has no target amplitude.'; return; }
+    const plan = planFor(task, geo), a = plan.amp;
+    const v = task === 'gaze' ? `, ±${plan.ampV}° vertical` : '';
+    const small = a < def.amp || (def.ampV && plan.ampV < def.ampV);
+    el.textContent = `Targets at ±${a}°${v}${small ? '. The standard angles do not fit this screen; full screen or a closer seat helps' : ''}. Enter ${a}°${v ? ` and ${plan.ampV}°` : ''} in Analyze.`;
+  }
+  ['#task', '#scrW', '#scrD'].forEach(sel => $(sel).addEventListener('input', () => { describeGeometry(); if (!stimRun) drawIdle(); }));
   function sizeStage() {
     const dpr = window.devicePixelRatio || 1;
     stim.width = Math.round(stim.clientWidth * dpr); stim.height = Math.round(stim.clientHeight * dpr);
-    if (!stimRun) drawStim(0, $('#task').value, true);
+    describeGeometry();
+    if (!stimRun) drawIdle();
   }
   new ResizeObserver(sizeStage).observe(stage);
-  function rng(seed) { let s = seed; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
-  function sacSchedule(seed) { const r = rng(seed), out = []; let t = 1; let side = 1; while (t < 40) { out.push({ t, side }); t += 1 + r(); side = side === 0 ? (r() < 0.5 ? 1 : -1) : 0; } return out; }
-  const sacPlan = sacSchedule(11);
-  const gazePlan = [[0, 0, 3, 'Center'], [1, 0, 10, 'Right gaze'], [0, 0, 3, 'Center'], [-1, 0, 10, 'Left gaze'], [0, 0, 3, 'Center'], [0, 1, 10, 'Up gaze'], [0, 0, 3, 'Center'], [0, -1, 10, 'Down gaze'], [0, 0, 3, 'Center']];
-  const TASK_LEN = { fixation: 20, gaze: gazePlan.reduce((a, g) => a + g[2], 0), sacH: 40, sacV: 40, pursuit: 20, okn: 30 };
-  function dot(ctx, x, y, s) {
-    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#e0261b'; ctx.beginPath(); ctx.arc(x, y, s * 0.35, 0, Math.PI * 2); ctx.fill();
+  function drawIdle() {
+    if (!stim.width) return;
+    const geo = geometry(), task = $('#task').value;
+    drawStim(0, planFor(task, geo), geo);
   }
-  function drawStim(t, task, idle) {
-    const ctx = stim.getContext('2d'), W = stim.width, H = stim.height;
+  function wrapText(ctx, text, x, y, maxW, lh) {
+    const words = text.split(' '), lines = []; let line = '';
+    for (const w of words) { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; }
+    lines.push(line);
+    lines.forEach((l, k) => ctx.fillText(l, x, y + (k - (lines.length - 1) / 2) * lh));
+  }
+  const INSTRUCT = {
+    fixation: 'Keep looking at the dot',
+    gaze: 'Follow the dot and hold your eyes on it',
+    sacH: 'Look at the dot as soon as it jumps',
+    sacV: 'Look at the dot as soon as it jumps',
+    anti: 'When a dot appears, look away from it, the same distance on the other side',
+    pursuit: 'Follow the dot smoothly with your eyes',
+    okn: 'Look at the stripes as they pass. Do not follow one stripe',
+    positional: 'Examiner: follow the steps on the screen. A beep marks each step',
+  };
+  function drawStim(t, plan, geo) {
+    const ctx = stim.getContext('2d'), W = stim.width, H = stim.height, cx = W / 2, cy = H / 2;
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-    const s = Math.max(6, Math.min(W, H) * 0.018), cx = W / 2, cy = H / 2, ax = W * 0.42, ay = H * 0.38;
-    let label = '';
-    if (task === 'okn') {
-      const dir = +$('#oknDir').value, sw = W * 0.06, off = ((t * W * 0.25 * dir) % (2 * sw) + 2 * sw) % (2 * sw);
+    const pxd = geo.ok ? geo.px : (d => d / 15 * W * 0.42);
+    const s = Math.max(6, geo.ok ? 0.25 * geo.pxPerDeg : Math.min(W, H) * 0.018);
+    const font = (px, w = 600) => `${w} ${Math.round(px)}px ${css('--font') || 'sans-serif'}`;
+    if (t < 0) {
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = font(Math.min(W, H) * 0.06);
+      wrapText(ctx, INSTRUCT[plan.task] || '', cx, cy - H * 0.12, W * 0.85, Math.min(W, H) * 0.08);
+      ctx.font = font(Math.min(W, H) * 0.12, 700);
+      ctx.fillText(String(Math.ceil(-t)), cx, cy + H * 0.2);
+      return 'Get ready';
+    }
+    const sh = plan.show(t);
+    const X = x => cx + pxd(x), Y = y => cy - pxd(y);
+    if (sh.kind === 'dot') {
+      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(X(sh.x), Y(sh.y), s, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#e0261b'; ctx.beginPath(); ctx.arc(X(sh.x), Y(sh.y), s * 0.35, 0, Math.PI * 2); ctx.fill();
+    } else if (sh.kind === 'cross') {
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(2, s * 0.35);
+      ctx.beginPath(); ctx.moveTo(cx - s * 1.4, cy); ctx.lineTo(cx + s * 1.4, cy); ctx.moveTo(cx, cy - s * 1.4); ctx.lineTo(cx, cy + s * 1.4); ctx.stroke();
+    } else if (sh.kind === 'stripes') {
+      const ppd = geo.ok ? geo.pxPerDeg : W / 30;
+      const sw = Math.max(12, 2.5 * ppd), seg = plan.stepAt(t);
+      const off = (((t - seg.t) * plan.oknSpeed * ppd * sh.dir) % (2 * sw) + 2 * sw) % (2 * sw);
       ctx.fillStyle = '#ffffff';
       for (let x = -2 * sw + off; x < W + 2 * sw; x += 2 * sw) ctx.fillRect(x, 0, sw, H);
-      label = dir > 0 ? 'Stripes moving right' : 'Stripes moving left';
-    } else if (task === 'fixation') { dot(ctx, cx, cy, s); label = 'Look at the dot'; }
-    else if (task === 'pursuit') { dot(ctx, cx + (idle ? 0 : ax * Math.sin(2 * Math.PI * 0.4 * t)), cy, s); label = 'Follow the dot'; }
-    else if (task === 'gaze') {
-      let acc = 0, cur = gazePlan[0];
-      for (const g of gazePlan) { if (t < acc + g[2]) { cur = g; break; } acc += g[2]; cur = g; }
-      dot(ctx, cx + cur[0] * ax, cy - cur[1] * ay, s); label = cur[3];
-    } else {
-      let cur = { side: 0 };
-      for (const p of sacPlan) { if (p.t <= t) cur = p; else break; }
-      const vert = task === 'sacV';
-      dot(ctx, cx + (vert ? 0 : cur.side * ax), cy - (vert ? cur.side * ay : 0), s); label = 'Jump to the dot';
+    } else if (sh.kind === 'text') {
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = font(Math.min(W, H) * 0.065);
+      wrapText(ctx, sh.text, cx, cy, W * 0.86, Math.min(W, H) * 0.09);
+    } else if (sh.kind === 'blank') {
+      ctx.fillStyle = '#555'; ctx.fillRect(0, 0, W, H);
     }
-    return label;
+    return sh.label;
+  }
+  function tone(at, freq, dur, gain = 0.5) {
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'sine'; o.frequency.value = freq;
+    g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(gain, at + 0.004);
+    g.gain.setValueAtTime(gain, at + dur - 0.004); g.gain.linearRampToValueAtTime(0, at + dur);
+    o.connect(g); g.connect(actx.destination); o.start(at); o.stop(at + dur + 0.02);
   }
   async function startStim() {
     stopStim();
-    const task = $('#task').value, len = TASK_LEN[task], t0 = performance.now();
+    // Safari only allows sound started directly inside the tap, so open the audio before any await.
+    const AC = window.AudioContext || window.webkitAudioContext;
+    let resumed = null;
+    try { if (AC) { actx = new AC(); resumed = actx.resume(); } } catch (e) { actx = null; }
+    const task = $('#task').value, geo = geometry(), plan = planFor(task, geo);
     try { if (navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { wakeLock = null; }
+    try { if (resumed) await resumed; } catch (e) { actx = null; }
+    let t0perf;
+    if (actx && actx.state === 'running') {
+      const T = actx.currentTime + PRE_ROLL, { freq, gap, dur, count } = OT.SYNC;
+      for (let k = 0; k < count; k++) tone(T - (count - 1 - k) * gap, freq, dur);
+      // Step beeps for the examiner-led positional test.
+      if (task === 'positional') plan.steps.slice(1).forEach(st => tone(T + st.t, 1000, 0.15, 0.35));
+      tone(T + plan.duration, 660, 0.25, 0.35);
+      const lat = (actx.outputLatency || 0) + (actx.baseLatency || 0);
+      t0perf = performance.now() + (T - actx.currentTime + lat) * 1000;
+      $('#stimStatus').textContent = plan.amp ? `Targets at ±${plan.amp}°${plan.task === 'gaze' ? `, ±${plan.ampV}° vertical` : ''}. Enter ${plan.amp}°${plan.task === 'gaze' ? ` and ${plan.ampV}°` : ''} in Analyze.` : '';
+    } else {
+      t0perf = performance.now() + PRE_ROLL * 1000;
+      $('#stimStatus').textContent = 'Sound is not available, so there is no start beep. Note when the first target appears and enter it in Analyze.';
+    }
     const frame = () => {
-      const t = (performance.now() - t0) / 1000;
-      const label = drawStim(t, task, false);
-      hud.textContent = `${label} · ${Math.max(0, len - t).toFixed(0)} s left`;
-      if (t >= len) { stopStim(); hud.textContent = 'Done'; return; }
+      const t = (performance.now() - t0perf) / 1000;
+      const label = drawStim(t, plan, geo);
+      hud.textContent = t < 0 ? `${OT.TASKS[task].name} · starts in ${Math.ceil(-t)} s` : `${label} · ${Math.max(0, plan.duration - t).toFixed(0)} s left`;
+      if (t >= plan.duration) { stopStim(true); hud.textContent = 'Done. Stop the phone recording.'; return; }
       stimRun = requestAnimationFrame(frame);
     };
     stimRun = requestAnimationFrame(frame);
   }
-  function stopStim() {
+  // A manual stop silences any beeps still scheduled; a natural end lets the end tone finish.
+  function stopStim(natural) {
     if (stimRun) cancelAnimationFrame(stimRun);
     stimRun = null; hud.textContent = 'Ready';
+    if (actx) { const a = actx; actx = null; setTimeout(() => a.close().catch(() => {}), natural === true ? 800 : 0); }
     if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
-    if (stim.width) drawStim(0, $('#task').value, true);
+    drawIdle();
   }
   $('#stimStart').addEventListener('click', startStim);
   $('#stimStop').addEventListener('click', stopStim);
   $('#task').addEventListener('change', stopStim);
-  $('#oknDir').addEventListener('change', () => { if (!stimRun) drawStim(0, 'okn', true); });
   $('#stimFull').addEventListener('click', () => {
     const p = stage.requestFullscreen ? stage.requestFullscreen() : null;
     if (p && p.catch) p.catch(() => { $('#stimStatus').textContent = 'Full screen is not available here. Rotate the device or enlarge the window instead.'; });
@@ -636,6 +916,8 @@
   document.addEventListener('fullscreenchange', sizeStage);
 
   // ---------- boot ----------
+  $('#algoVersion').textContent = OT.ALGO_VERSION;
+  syncTaskFields();
   let startTab = 'analyze';
   try { const s = localStorage.getItem('ocutrace-tab'); if (tabs.includes(s)) startTab = s; } catch (e) {}
   loadSynthetic();

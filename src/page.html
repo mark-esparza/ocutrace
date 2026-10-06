@@ -15,6 +15,7 @@
   --graph-h: #111111;
   --graph-v: #8c8c8c;
   --graph-ev: #c8102e;
+  --graph-target: #2f6fd6;
   --graph-label: #333333;
   --graph-sep: #bdbdbd;
   --font: Tahoma, Verdana, "Segoe UI", Geneva, sans-serif;
@@ -55,7 +56,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); font
 
 .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 20px; }
 .field { display: grid; gap: 4px; font-size: 14px; }
-select { font: 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--field); border-radius: 4px; padding: 8px; min-height: 42px; }
+select, input[type="number"] { font: 14px var(--font); color: var(--text); background: var(--bg); border: 1px solid var(--field); border-radius: 4px; padding: 8px; min-height: 42px; }
 .check { display: flex; gap: 8px; align-items: center; font-size: 14px; min-height: 42px; }
 .check input { width: 17px; height: 17px; accent-color: var(--red); }
 input[type=range] { width: 100%; accent-color: var(--red); }
@@ -151,13 +152,39 @@ footer a { color: inherit; }
             </label>
             <label class="check" for="mirrored"><input type="checkbox" id="mirrored">The clip is mirrored like a selfie preview</label>
           </div>
+          <div class="settings">
+            <label class="field" for="anTask">Task in this clip
+              <select id="anTask">
+                <option value="free">Free recording (nystagmus)</option>
+                <option value="fixation">Fixation</option>
+                <option value="gaze">Gaze holding</option>
+                <option value="sacH">Prosaccades, horizontal</option>
+                <option value="sacV">Prosaccades, vertical</option>
+                <option value="anti">Antisaccades</option>
+                <option value="pursuit">Smooth pursuit</option>
+                <option value="okn">Optokinetic</option>
+                <option value="positional">Positional</option>
+              </select>
+            </label>
+            <label class="field" for="anAmp" id="anAmpField">Target amplitude from the stimulus screen (°)
+              <input type="number" id="anAmp" min="1" max="40" step="1" value="10" inputmode="decimal">
+            </label>
+            <label class="field" for="anAmpV" id="anAmpVField">Vertical target amplitude (°)
+              <input type="number" id="anAmpV" min="1" max="40" step="1" value="10" inputmode="decimal">
+            </label>
+            <label class="field" for="anStart" id="anStartField">Task start, seconds into the clip
+              <input type="number" id="anStart" min="0" step="0.01" placeholder="Not set" inputmode="decimal">
+            </label>
+            <div class="field" id="beepField"><span aria-hidden="true">&nbsp;</span><button class="btn" id="beepBtn" type="button">Find the start beep</button></div>
+          </div>
+          <p class="status" id="syncStatus" role="status"></p>
           <p class="status" id="srcStatus" role="status"></p>
           <video id="vid" muted playsinline preload="auto" style="position:absolute;width:2px;height:2px;opacity:0.01;pointer-events:none;left:0;top:0"></video>
         </section>
 
         <section class="group" id="markCard" aria-labelledby="h-mark">
           <h2 id="h-mark"><span class="n">2</span>Mark the eye</h2>
-          <p class="hint">Tap the center of one iris, then a fixed point on the face such as a sticker on the nose bridge.</p>
+          <p class="hint">Tap the center of one iris, then a fixed point on the face such as a sticker on the nose bridge. The other eye is optional.</p>
           <div class="viewfinder sunken">
             <canvas id="frame" width="480" height="320" aria-label="Grayscale first frame, as the tracker sees it. Tap to place marks."></canvas>
             <span class="readout" id="markSource">Synthetic eye</span>
@@ -171,7 +198,10 @@ footer a { color: inherit; }
             <button class="btn" id="markIrisBtn" type="button">Re-mark iris</button>
             <button class="btn" id="markRefBtn" type="button">Mark fixed point</button>
             <button class="btn" id="clearRefBtn" type="button">Clear fixed point</button>
+            <button class="btn" id="markEye2Btn" type="button">Mark the other eye</button>
+            <button class="btn" id="clearEye2Btn" type="button">Clear other eye</button>
           </div>
+          <p class="hint">Marking both eyes adds the adducting to abducting velocity ratio used for internuclear ophthalmoplegia.</p>
           <div class="progress" id="prog" hidden role="progressbar" aria-label="Tracking progress" aria-valuemin="0" aria-valuemax="100"><div class="bar"></div></div>
         </section>
 
@@ -192,6 +222,7 @@ footer a { color: inherit; }
               <span><i style="--c:var(--graph-h)"></i>Horizontal, up is the patient's right</span>
               <span><i style="--c:var(--graph-v)"></i>Vertical, up is up</span>
               <span><i style="--c:var(--graph-ev)"></i>Fast phase or saccade</span>
+              <span id="legendTarget" hidden><i style="--c:var(--graph-target)"></i>Target, dashed</span>
             </figcaption>
           </figure>
           <div class="listview sunken">
@@ -204,9 +235,14 @@ footer a { color: inherit; }
           <div class="row">
             <button class="btn" id="saveCsv" type="button" hidden>Save trace as CSV</button>
             <button class="btn" id="copyCsv" type="button">Copy trace as CSV</button>
+            <button class="btn" id="saveSummary" type="button">Save measures as CSV</button>
           </div>
           <p class="status" id="csvStatus" role="status"></p>
           <textarea id="csvBox" hidden readonly aria-label="Trace CSV"></textarea>
+          <details id="trialDetails" hidden open>
+            <summary id="trialSummary">Trials</summary>
+            <div class="listview sunken"><table id="trialTable"><thead></thead><tbody></tbody></table></div>
+          </details>
           <details id="evDetails">
             <summary id="evSummary">Fast events</summary>
             <div class="listview sunken"><table id="evTable"><thead><tr><th class="num">Time (s)</th><th>Type</th><th>Direction</th><th class="num">Size (°)</th><th class="num">Peak (°/s)</th></tr></thead><tbody></tbody></table></div>
@@ -221,7 +257,14 @@ footer a { color: inherit; }
               <li>A fast event is any stretch where speed exceeds the larger of 20°/s and the median speed plus six robust standard deviations.</li>
               <li>Nystagmus is called when at least three fast phases go one way (70% agreement) and the median slow phase velocity between them is at least 2°/s the other way.</li>
               <li>Square wave jerks are opposite horizontal saccade pairs of 0.5° to 5°, similar in size, 150 to 500 ms apart.</li>
+              <li>Timed tasks are lined up with the stimulus by its three start beeps, found in the clip's sound. Saccade latency is the time from the target step to saccade onset (speed rising past 20% of its peak), and includes the stimulus screen's display delay. Responses under 80 ms count as anticipatory.</li>
+              <li>Saccade gain is the primary saccade divided by the target step. An antisaccade error is a first saccade toward the cue.</li>
+              <li>Pursuit gain is the amplitude of eye velocity at the target frequency, fitted with catch-up saccades removed, divided by target velocity. Catch-up saccades are found on eye velocity minus that fit.</li>
+              <li>Optokinetic gain is slow phase velocity divided by stripe speed; asymmetry is (right − left) ÷ (right + left).</li>
+              <li>Positional nystagmus is followed in 2 s windows every 0.5 s; onset, duration, peak slow phase velocity and time to half the peak are reported for each position.</li>
+              <li>With both eyes marked, the adducting to abducting ratio is the median ratio of each eye's peak horizontal velocity across saccades of 2° or more.</li>
               <li>Torsional nystagmus is not measured. Below about 240 fps, peak speeds read low and brief saccades can be missed.</li>
+              <li>Algorithm version <span id="algoVersion"></span>. It is written into every saved file so a study can lock one version.</li>
             </ul>
           </details>
         </section>
@@ -231,22 +274,28 @@ footer a { color: inherit; }
       <div id="panel-stimulus" class="panel" role="tabpanel" aria-labelledby="tab-stimulus" hidden>
         <section class="group" aria-labelledby="h-stim">
           <h2 id="h-stim">Stimulus screen</h2>
-          <p class="hint">Run this on a laptop or tablet at eye level, 50 to 70 cm from the patient, while a phone records their eyes.</p>
+          <p class="hint">Run this on a laptop or tablet at eye level, 50 to 70 cm from the patient, while a phone records their eyes with sound on. Each task starts with three beeps that let the analysis line the clip up with the targets.</p>
           <div class="settings">
             <label class="field" for="task">Task
               <select id="task">
-                <option value="fixation">Fixation, 20 s</option>
+                <option value="fixation">Fixation, 15 s</option>
                 <option value="gaze">Gaze holding: right, left, up, down</option>
-                <option value="sacH">Saccades, horizontal</option>
-                <option value="sacV">Saccades, vertical</option>
+                <option value="sacH">Prosaccades, horizontal</option>
+                <option value="sacV">Prosaccades, vertical</option>
+                <option value="anti">Antisaccades</option>
                 <option value="pursuit">Smooth pursuit, 0.4 Hz</option>
-                <option value="okn">Optokinetic stripes</option>
+                <option value="okn">Optokinetic, right then left</option>
+                <option value="positional">Positional, guided steps</option>
               </select>
             </label>
-            <label class="field" for="oknDir">Stripe direction
-              <select id="oknDir"><option value="1">Moving right</option><option value="-1">Moving left</option></select>
+            <label class="field" for="scrW">Screen width, edge to edge of the picture (cm)
+              <input type="number" id="scrW" min="5" max="300" step="0.5" value="30" inputmode="decimal">
+            </label>
+            <label class="field" for="scrD">Viewing distance from the eyes (cm)
+              <input type="number" id="scrD" min="20" max="300" step="1" value="60" inputmode="decimal">
             </label>
           </div>
+          <p class="status" id="geomStatus" role="status"></p>
           <div class="stage sunken" id="stage"><canvas id="stim"></canvas><div class="hud" id="hud">Ready</div></div>
           <div class="row">
             <button class="btn default" id="stimStart" type="button">Start task</button>
@@ -264,11 +313,22 @@ footer a { color: inherit; }
           <ol>
             <li>Light the face evenly from the front. A window or lamp behind the patient hides the iris edge.</li>
             <li>Put the phone on a stand 15 to 25 cm from the face, just below the line of sight, with both eyes filling most of the frame.</li>
-            <li>For gaze, saccade, pursuit and optokinetic tasks, run the Stimulus tab on a second device 50 to 70 cm away.</li>
             <li>Put a small dark dot sticker on the bridge of the nose and mark it as the fixed point, so head movement cancels out.</li>
-            <li>Use slow motion (120 or 240 fps) when saccade speed matters, and set Capture speed to match. Normal video is enough for nystagmus and fixation.</li>
-            <li>Record 10 to 30 seconds per task with the head resting on a hand or chin rest.</li>
+            <li>For every task except free recording, run the Stimulus tab on a second device 50 to 70 cm away. Enter its screen width and distance so targets land at known angles, and note the target amplitude it shows.</li>
+            <li>Start the phone recording with sound on, then press Start task. The three beeps mark the start; keep the room quiet for them.</li>
+            <li>Use slow motion (120 or 240 fps) when saccade speed matters, and set Capture speed to match. Normal video is enough for nystagmus, fixation, gaze holding, pursuit and optokinetic tasks.</li>
+            <li>In Analyze, choose the same task, check the amplitude, and press Find the start beep. If the beep cannot be found, type the time it sounds in the clip.</li>
           </ol>
+          <h2>The battery</h2>
+          <dl>
+            <dt>Fixation, 15 s</dt><dd>Square wave jerks per minute, drift, fixation stability, primary position nystagmus.</dd>
+            <dt>Gaze holding, 10 s each way</dt><dd>Drift toward center, beat direction and frequency in each position, and an eye position gain that checks the degree scale for this person.</dd>
+            <dt>Prosaccades</dt><dd>Latency, gain and peak velocity per trial. Peak velocity needs 240 fps.</dd>
+            <dt>Antisaccades</dt><dd>Look away from the dot, the same distance on the other side. Direction error rate, corrected errors, latency of correct responses.</dd>
+            <dt>Smooth pursuit, 0.4 Hz</dt><dd>Velocity gain, lag behind the target, catch-up saccades per second.</dd>
+            <dt>Optokinetic, right then left</dt><dd>Slow phase velocity, gain and asymmetry between directions.</dd>
+            <dt>Positional</dt><dd>The screen guides the examiner through Dix-Hallpike and supine roll tests with a beep at each step. Onset, direction, duration, peak slow phase velocity and fading for each position.</dd>
+          </dl>
         </section>
         <section class="group" aria-labelledby="h-mean">
           <h2 id="h-mean">What the measures mean</h2>
@@ -291,6 +351,9 @@ footer a { color: inherit; }
 
 <script>
 /*CORE*/
+</script>
+<script>
+/*TASKS*/
 </script>
 <script>
 /*APP*/
