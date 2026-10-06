@@ -160,6 +160,7 @@
       $('#irisSize').value = 100;
       state.marking = 'ref';
       $('#markStatus').textContent = 'Iris marked. Adjust the outline if it does not sit on the iris edge, then tap a fixed point or track.';
+      preCheck();
     } else if (state.marking === 'iris2') {
       state.iris2 = irisAt(x, y);
       state.marking = null;
@@ -171,7 +172,30 @@
     }
     renderFrame();
   });
-  $('#irisSize').addEventListener('input', renderFrame);
+  $('#irisSize').addEventListener('input', () => { renderFrame(); preCheck(); });
+  // Recording check on the marked frame, before any tracking.
+  function frameCheck() {
+    if (!state.src || !state.iris) return null;
+    const r = irisRadius();
+    const c = cropGray(state.src.drawable, state.src.vw, state.src.vh, state.iris.x, state.iris.y, 6 * r, N);
+    const loc = OT.locateIris(c.g, N, (state.iris.x - c.sx) * c.s - 0.5, (state.iris.y - c.sy) * c.s - 0.5, r * c.s, null, 2, 2);
+    return { ...eyeStats(c.g, N), radius: r, contrast: loc.ring - loc.dark };
+  }
+  function renderChecks(ul, check) {
+    ul.innerHTML = '';
+    for (const it of check.items) {
+      const li = document.createElement('li'); li.className = it.status;
+      const a = document.createElement('span'); a.textContent = `${it.label}: ${it.value}`; li.appendChild(a);
+      if (it.advice) { const b = document.createElement('span'); b.className = 'adv'; b.textContent = it.advice; li.appendChild(b); }
+      ul.appendChild(li);
+    }
+  }
+  function preCheck() {
+    const m = frameCheck(), ul = $('#preCheck');
+    if (!m) { ul.hidden = true; return; }
+    state.frameCheck = m;
+    renderChecks(ul, OT.recordingCheck(m)); ul.hidden = false;
+  }
   $('#markIrisBtn').addEventListener('click', () => { state.marking = 'iris'; $('#markStatus').textContent = 'Tap the center of one iris.'; renderFrame(); });
   $('#markRefBtn').addEventListener('click', () => { state.marking = 'ref'; $('#markStatus').textContent = 'Tap a fixed point such as a sticker on the nose bridge.'; renderFrame(); });
   $('#clearRefBtn').addEventListener('click', () => { state.ref = null; renderFrame(); });
@@ -179,6 +203,16 @@
   $('#clearEye2Btn').addEventListener('click', () => { state.iris2 = null; renderFrame(); });
 
   // ---------- tracker ----------
+  // Light and glare in the tracking crop: mean grey level, and the share of saturated pixels near the iris.
+  function eyeStats(g, n) {
+    let sum = 0, sat = 0, cnt = 0;
+    const a = Math.floor(n / 4), b = Math.ceil(3 * n / 4);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const v = g[y * n + x]; sum += v;
+      if (y >= a && y < b && x >= a && x < b) { cnt++; if (v >= 245) sat++; }
+    }
+    return { luma: sum / (n * n), glare: cnt ? sat / cnt : 0 };
+  }
   function makeIrisTracker(src, iris, r) {
     let cx = iris.x, cy = iris.y, refScore = null;
     return drawable => {
@@ -189,7 +223,7 @@
       const conf = refScore ? loc.score / refScore : 0;
       const ok = conf >= 0.45 && Math.hypot(nx - cx, ny - cy) <= 1.5 * r;
       if (ok) { cx = nx; cy = ny; }
-      return { ok, x: nx, y: ny };
+      return { ok, x: nx, y: ny, ...eyeStats(c.g, N) };
     };
   }
   function makeRefTracker(src, ref, r) {
@@ -212,7 +246,7 @@
     let o1 = null, o2 = null;
     return function step(drawable) {
       const a = e1(drawable), b = e2 ? e2(drawable) : null, f = rt ? rt(drawable) : { ok: true, x: 0, y: 0 };
-      const out = { ok: a.ok && f.ok };
+      const out = { ok: a.ok && f.ok, luma: a.luma, glare: a.glare };
       if (out.ok) { const ex = a.x - f.x, ey = a.y - f.y; if (!o1) o1 = { x: ex, y: ey }; out.dx = ex - o1.x; out.dy = ey - o1.y; }
       if (b) {
         out.ok2 = b.ok && f.ok;
@@ -224,6 +258,7 @@
   function toDeg(trk, r, r2, mirrored) {
     const sx = mirrored ? 1 : -1;
     const out = trk.ok ? { x: OT.pxToDeg(sx * trk.dx, r), y: OT.pxToDeg(-trk.dy, r), ok: true } : { x: NaN, y: NaN, ok: false };
+    out.luma = trk.luma; out.glare = trk.glare;
     if ('ok2' in trk) Object.assign(out, trk.ok2 ? { x2: OT.pxToDeg(sx * trk.dx2, r2), y2: OT.pxToDeg(-trk.dy2, r2), ok2: true } : { x2: NaN, y2: NaN, ok2: false });
     return out;
   }
@@ -439,6 +474,37 @@
       status.textContent = 'The sound track could not be read. Enter the time the third beep sounds.'; status.classList.add('err');
     }
   }
+  // Per-person degree scale, from this person's gaze holding clip. Kept in this browser for convenience
+  // and written into every saved file, so a study can see which scale each recording used.
+  function calibration() {
+    const clamp = v => Number.isFinite(v) ? Math.min(1.5, Math.max(0.5, v)) : 1;
+    return { h: clamp(parseFloat($('#calH').value)), v: clamp(parseFloat($('#calV').value)) };
+  }
+  function describeCalibration(source) {
+    const c = calibration(), on = c.h !== 1 || c.v !== 1;
+    $('#calStatus').textContent = on
+      ? `Calibration in use: horizontal × ${c.h.toFixed(2)}, vertical × ${c.v.toFixed(2)}${source ? `, ${source}` : ''}. Set both to 1 to use the population scale.`
+      : 'No calibration: degrees use the population average iris and eye size. Record the gaze holding task to calibrate this person.';
+  }
+  function saveCalibration(source) {
+    const c = calibration();
+    try { localStorage.setItem('ocutrace-calibration', JSON.stringify({ ...c, source, date: new Date().toISOString().slice(0, 10) })); } catch (e) {}
+    describeCalibration(source);
+  }
+  ['#calH', '#calV'].forEach(sel => $(sel).addEventListener('change', () => { saveCalibration('entered by hand'); refreshResult(); }));
+  $('#useCalBtn').addEventListener('click', () => {
+    const g = state.task && state.task.out && state.task.out.calibration; if (!g) return;
+    const c = calibration();
+    // The clip was analyzed with the current correction applied, so the new correction compounds it.
+    $('#calH').value = (c.h * g.h).toFixed(3); $('#calV').value = (c.v * g.v).toFixed(3);
+    saveCalibration(`from gaze holding in ${state.resultLabel}`);
+    refreshResult();
+  });
+  try {
+    const saved = JSON.parse(localStorage.getItem('ocutrace-calibration') || 'null');
+    if (saved && saved.h > 0 && saved.v > 0) { $('#calH').value = saved.h; $('#calV').value = saved.v; describeCalibration(`${saved.source || 'saved'}${saved.date ? ', ' + saved.date : ''}`); }
+  } catch (e) {}
+
   function taskContext() {
     const task = $('#anTask').value, def = OT.TASKS[task];
     const plan = OT.makePlan(task, +$('#anAmp').value || def.amp, def.ampV ? +$('#anAmpV').value || def.ampV : 0);
@@ -455,6 +521,8 @@
   const FAST_DIR = { 'Right-beating': 'rightward', 'Left-beating': 'leftward', 'Upbeat': 'upward', 'Downbeat': 'downward' };
   function showResult(samples, label, synthetic) {
     state.samples = samples; state.resultLabel = label; state.resultSynthetic = synthetic;
+    state.cal = synthetic ? { h: 1, v: 1 } : calibration();
+    samples = state.calSamples = OT.applyCalibration(samples, state.cal);
     const res = OT.analyze(samples);
     state.result = res;
     const tc = taskContext();
@@ -510,6 +578,18 @@
       note.lastChild.textContent = `At ${fmt(res.fps, 0)} fps, peak speeds read low and brief saccades can be missed. Record in 240 fps slow motion when saccade speed matters.`;
     }
     else note.hidden = true;
+
+    // Recording check over the whole clip.
+    const fm = state.frameCheck || {};
+    const lumas = samples.map(s => s.luma).filter(Number.isFinite), glares = samples.map(s => s.glare).filter(Number.isFinite);
+    const dts = []; for (let i = 1; i < samples.length; i++) dts.push(samples[i].t - samples[i - 1].t);
+    state.check = OT.recordingCheck({ luma: OT.median(lumas), glare: OT.median(glares), radius: irisRadius(), contrast: fm.contrast,
+      validPct: res.validPct, dts, saccadic: ['sacH', 'sacV', 'anti'].includes(tc.task) });
+    renderChecks($('#checkList'), state.check);
+    const nBad = state.check.items.filter(i => i.status !== 'ok').length;
+    $('#checkSummary').textContent = nBad ? `Recording check: ${nBad} item${nBad > 1 ? 's' : ''} to review` : 'Recording check: all clear';
+    $('#checkDetails').open = nBad > 0;
+    $('#calRow').hidden = !(tc.task === 'gaze' && out && out.calibration && Number.isFinite(out.calibration.h) && Number.isFinite(out.calibration.v) && !synthetic);
 
     const td = $('#trialDetails');
     if (out && out.trials && out.trials.length) {
@@ -670,7 +750,7 @@
     const res = state.result; if (!res) return '';
     const evAt = new Array(res.n).fill('');
     res.events.forEach((e, k) => { for (let i = e.i0; i <= e.i1; i++) evAt[i] = String(k + 1); });
-    const smp = state.samples, two = smp.some(s => 'ok2' in s);
+    const smp = state.calSamples || state.samples, two = smp.some(s => 'ok2' in s);
     const mx2 = two ? OT.median(smp.map(s => s.ok2 ? s.x2 : NaN)) : 0, my2 = two ? OT.median(smp.map(s => s.ok2 ? s.y2 : NaN)) : 0;
     const tk = state.task, timed = tk && tk.plan && tk.t0 != null;
     const head = ['t_s', 'h_deg', 'v_deg', 'valid', 'interpolated', 'speed_deg_s', 'event'];
@@ -694,6 +774,7 @@
       ['task_start_clip_s', tk.t0 != null ? (tk.t0 * F).toFixed(3) : ''], ['target_amplitude_deg', tk.plan && tk.plan.amp ? tk.plan.amp : ''],
       ['capture_speed_factor', F], ['frame_rate_fps', res.fps.toFixed(1)], ['duration_s', res.duration.toFixed(2)], ['frames_tracked_pct', (res.validPct * 100).toFixed(1)],
       ['eyes_tracked', state.samples.some(s => 'ok2' in s) ? 2 : 1], ['fixed_point', state.ref ? 'yes' : 'no'], ['mirrored', $('#mirrored').checked ? 'yes' : 'no'],
+      ['calibration_horizontal', state.cal ? state.cal.h : 1], ['calibration_vertical', state.cal ? state.cal.v : 1],
       ['generated', new Date().toISOString()],
     ];
     const lines = ['section,name,value,unit,basis'];
@@ -707,6 +788,7 @@
       { label: 'Fast events', value: res.events.length, unit: '', basis: `Median peak speed ${fmt(res.medianPeakVel, 0)} deg/s` },
     ];
     [...measures, ...base].forEach(mm => lines.push(['measure', mm.label, mm.text || (Number.isFinite(mm.value) ? +mm.value.toFixed(4) : ''), (mm.unit || '').replace('°', 'deg'), mm.basis].map(q).join(',')));
+    if (state.check) state.check.items.forEach(it => lines.push(['check', `${it.label} (${it.status})`, it.value, '', it.advice].map(q).join(',')));
     if (tk.out && tk.out.trials) {
       lines.push('', ['trial', ...tk.out.trialCols].map(q).join(','));
       tk.out.trials.forEach((r, k) => lines.push([k + 1, ...r].map(q).join(',')));
@@ -718,6 +800,36 @@
     const task = state.task && state.task.task !== 'free' ? `-${state.task.task}` : '';
     return `ocutrace-${base}${task}-${kind}-${new Date().toISOString().slice(0, 10)}.csv`;
   }
+  // Eye-Tracking-BIDS dataset as a zip: physio files are gzipped with the browser's CompressionStream.
+  async function gzip(text) {
+    const cs = new CompressionStream('gzip');
+    const out = new Blob([text]).stream().pipeThrough(cs);
+    return new Uint8Array(await new Response(out).arrayBuffer());
+  }
+  function eyeSides() {
+    if (!state.src || state.src.kind !== 'video' || !state.iris) return ['n/a', 'n/a'];
+    const mirrored = $('#mirrored').checked;
+    if (state.iris2) return rightEyeKey() === 'a' ? ['right', 'left'] : ['left', 'right'];
+    // One eye: in an unmirrored front view the subject's right eye sits in the left half of the picture.
+    return [(state.iris.x < state.src.vw / 2) !== mirrored ? 'right' : 'left'];
+  }
+  $('#saveBids').addEventListener('click', async () => {
+    if (!state.result) return;
+    if (typeof CompressionStream === 'undefined') { $('#csvStatus').textContent = 'This browser cannot compress files, which BIDS requires. Use a current Chrome, Edge, Firefox or Safari.'; return; }
+    try {
+      const tk = state.task, sub = $('#bidsSub').value.replace(/[^A-Za-z0-9]/g, '') || '01';
+      const files = OT.bidsFiles(state.calSamples, state.result, { sub, task: tk.task, plan: tk.plan, t0: tk.t0, eyes: eyeSides(),
+        source: state.resultLabel, calibration: state.cal, measuresCsv: buildSummary() });
+      const root = `ocutrace-bids-sub-${sub}-task-${tk.task}`;
+      const entries = [];
+      for (const f of files) entries.push({ path: `${root}/${f.path}`, bytes: f.gzip ? await gzip(f.text) : new TextEncoder().encode(f.text) });
+      const url = URL.createObjectURL(new Blob([OT.zip(entries)], { type: 'application/zip' }));
+      const a = document.createElement('a'); a.href = url; a.download = `${root}.zip`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      $('#csvStatus').textContent = `Saved a BIDS dataset with ${files.length} files.`;
+    } catch (e) { $('#csvStatus').textContent = 'The BIDS export failed: ' + (e && e.message || e); }
+  });
   $('#saveSummary').addEventListener('click', async () => {
     if (!downloads || !state.result) return;
     try { await downloads.save({ filename: csvName('measures'), data: buildSummary() }); $('#csvStatus').textContent = 'Measures saved.'; }

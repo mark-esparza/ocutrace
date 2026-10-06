@@ -16,6 +16,8 @@ jobs:
         run: node test/synthetic.test.js
       - name: Task battery measures test
         run: node test/tasks.test.js
+      - name: Recording check and BIDS export test
+        run: node test/export.test.js
       - name: index.html matches src/
         run: |
           node build.js
