@@ -1,5 +1,6 @@
 // OcuTrace core: iris locator, template matcher, and oculomotor analysis.
 // Pure functions, no DOM. Shared by the page and the Node tests.
+// Copyright (c) 2026 Mark Esparza. Released under the MIT License; see LICENSE.
 
 const OT = (() => {
   const HVID_MM = 11.7;      // average horizontal visible iris diameter
