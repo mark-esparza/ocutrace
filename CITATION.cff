@@ -3,21 +3,29 @@ message: "If you use this software, please cite it using the metadata below."
 type: software
 title: "OcuTrace: browser-based nystagmus and saccade recording from phone video"
 abstract: >-
-  Research prototype that turns a phone video of the eyes into a nystagmus and
-  saccade recording. Tracks the iris and a fixed facial reference point in the
-  browser, and reports fast events, slow phase velocity, beat frequency, square
-  wave jerks and tracking quality. Not a medical device and not for diagnosis.
+  Research prototype that turns a phone video of the eyes into a quantitative
+  oculomotor recording. Tracks the iris and a fixed facial reference point in
+  the browser, runs a standardized task battery (fixation, gaze holding,
+  prosaccades, antisaccades, smooth pursuit, optokinetic and positional
+  testing) aligned by audio start tones, and reports per-task measures with
+  raw traces, a recording quality check and Eye-Tracking-BIDS export. Not a
+  medical device and not for diagnosis.
 authors:
   - family-names: Esparza
     given-names: Mark
+    affiliation: Independent researcher
     orcid: "https://orcid.org/0009-0000-5171-102X"
 repository-code: "https://github.com/mark-esparza/ocutrace"
 url: "https://mark-esparza.github.io/ocutrace/"
 license: MIT
-version: 0.1.0
+version: 0.3.0
+date-released: 2026-10-13
 keywords:
   - eye tracking
   - nystagmus
   - saccades
   - oculomotor
   - video oculography
+  - smartphone
+  - digital biomarkers
+  - neuro-ophthalmology
