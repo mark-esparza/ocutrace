@@ -1,0 +1,32 @@
+{
+  "title": "OcuTrace: browser-based nystagmus and saccade recording from phone video",
+  "upload_type": "software",
+  "description": "<p>OcuTrace is a research prototype that turns a phone video of the eyes into a quantitative oculomotor recording. It runs as a single static web page with no external dependencies, and video is processed in the browser and never uploaded.</p><p>It tracks the iris and a fixed facial reference point, removes head movement, and reports fast events, nystagmus direction, slow phase velocity, beat frequency, square wave jerks and tracking quality. A companion stimulus screen runs a standardized battery (fixation, gaze holding, prosaccades, antisaccades, smooth pursuit, optokinetic and positional testing), lines each clip up with its stimulus by audio start tones, and scores per-task measures, including curve-fit saccade latency with a per-trial quality score and the adducting to abducting velocity ratio when both eyes are tracked. Each clip is graded for lighting, glare, iris contrast and frame timing. Results export as CSV or as an Eye-Tracking-BIDS dataset that passes the official BIDS validator.</p><p>This release contains the page (index.html), its source (src/), the build script and the synthetic test suite. Algorithm version 0.3.0. The measures have been checked only against synthetic recordings with known answers, not in patients.</p><p><strong>OcuTrace is not a medical device, has not been cleared or approved by any regulator, and must not be used for diagnosis or treatment decisions.</strong></p><p>Live prototype: <a href=\"https://mark-esparza.github.io/ocutrace/\">https://mark-esparza.github.io/ocutrace/</a></p><p>OcuTrace is the author's independent work. It was not funded or directed by any institution.</p>",
+  "creators": [
+    {
+      "name": "Esparza, Mark",
+      "affiliation": "Independent researcher",
+      "orcid": "0009-0000-5171-102X"
+    }
+  ],
+  "license": "mit",
+  "access_right": "open",
+  "keywords": [
+    "eye tracking",
+    "nystagmus",
+    "saccades",
+    "oculomotor",
+    "video oculography",
+    "smartphone",
+    "digital biomarkers",
+    "neuro-ophthalmology",
+    "BIDS"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://mark-esparza.github.io/ocutrace/",
+      "relation": "isDocumentedBy"
+    }
+  ],
+  "notes": "Research prototype. Not a medical device and not for diagnosis or treatment decisions. Validated so far only on synthetic recordings."
+}

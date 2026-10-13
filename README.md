@@ -57,7 +57,11 @@ The tool is a single static `index.html` with no external dependencies. Edit the
 
 ## Citation
 
-If you use this software, please cite it using the metadata in [CITATION.cff](CITATION.cff). GitHub shows a "Cite this repository" button with formatted citations.
+If you use this software, please cite it using the metadata in [CITATION.cff](CITATION.cff). GitHub shows a "Cite this repository" button with formatted citations. Each release is archived on Zenodo with its own DOI.
+
+## Independence
+
+OcuTrace is the author's independent work. It was not funded or directed by any institution.
 
 ## License
 
