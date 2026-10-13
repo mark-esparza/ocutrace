@@ -8,7 +8,18 @@ OcuTrace turns a phone video of the eyes into a nystagmus and saccade recording.
 
 > **Copyright © 2026 Mark Esparza.** OcuTrace is open-source software released under the
 > [MIT License](LICENSE). See [NOTICE](NOTICE) for method credits and the medical-use
-> disclaimer. If you use OcuTrace in research, please cite it (see [CITATION.cff](CITATION.cff)).
+> disclaimer. If you use OcuTrace in research, please cite it (see [CITATION.cff](CITATION.cff)):
+> https://doi.org/10.5281/zenodo.23345222 (all versions; v0.3.0 is https://doi.org/10.5281/zenodo.23345223)
+
+## Preprint
+
+The rationale for OcuTrace, its design, the synthetic validation of this prototype, and a
+validation program are described in a preprint (not peer reviewed):
+
+> Esparza, M. (2026). *OcuTrace: Smartphone Oculomotor Recording for Neurology and Clinical
+> Research* [Preprint]. Zenodo. https://doi.org/10.5281/zenodo.23345364
+
+The results in the preprint were produced with OcuTrace 0.3.0.
 
 ## How it works
 
@@ -57,7 +68,7 @@ The tool is a single static `index.html` with no external dependencies. Edit the
 
 ## Citation
 
-If you use this software, please cite it using the metadata in [CITATION.cff](CITATION.cff). GitHub shows a "Cite this repository" button with formatted citations. Each release is archived on Zenodo with its own DOI.
+If you use this software, please cite it using the metadata in [CITATION.cff](CITATION.cff). GitHub shows a "Cite this repository" button with formatted citations. Each release is archived on Zenodo with its own DOI; the concept DOI https://doi.org/10.5281/zenodo.23345222 always resolves to the latest release.
 
 ## Independence
 

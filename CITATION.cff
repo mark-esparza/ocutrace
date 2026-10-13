@@ -15,6 +15,7 @@ authors:
     given-names: Mark
     affiliation: Independent researcher
     orcid: "https://orcid.org/0009-0000-5171-102X"
+doi: 10.5281/zenodo.23345223
 repository-code: "https://github.com/mark-esparza/ocutrace"
 url: "https://mark-esparza.github.io/ocutrace/"
 license: MIT
@@ -29,3 +30,17 @@ keywords:
   - smartphone
   - digital biomarkers
   - neuro-ophthalmology
+preferred-citation:
+  type: article
+  title: "OcuTrace: Smartphone Oculomotor Recording for Neurology and Clinical Research"
+  authors:
+    - family-names: Esparza
+      given-names: Mark
+      orcid: "https://orcid.org/0009-0000-5171-102X"
+  doi: 10.5281/zenodo.23345364
+  url: "https://zenodo.org/records/23345364"
+  publisher:
+    name: Zenodo
+  year: 2026
+  month: 10
+  status: preprint
